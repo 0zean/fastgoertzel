@@ -6,14 +6,14 @@
 fastgoertzel
 ============
 
-A Python implementation of the Goertzel algorithm built using `Rust` for improved run time and efficiency on large datasets and large for loops.
+A Python implementation of the Goertzel algorithm built using `Rust` for improved run time and efficiency on large datasets and loops.
 
 
 ## To-Do:
 
 - [ ] Improved speed.
-- [ ] Implement testing for speed comparison
-- [ ] Fix issue with IIR implementation of Goertzel.
+- [ ] Implement benchmarking for speed comparison
+- [ ] add IIR and k-th FTT implementation of Goertzel.
 - [ ] Add support for sampling rate.
 
 ## Installation
