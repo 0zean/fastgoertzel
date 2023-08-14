@@ -4,8 +4,22 @@ use ndarray::prelude::*;
 use ndarray::Array;
 use std::f64::consts::PI;
 
-/// Formats the sum of two numbers as string.
 #[pyfunction]
+/// Goertzel algorithm for the given input data and frequency.
+///
+/// This function calculates the amplitude and phase using the Goertzel algorithm.
+///
+/// Parameters
+/// ----------
+/// x : List[float]
+///     The input data.
+/// f : float
+///     The frequency value.
+///
+/// Returns
+/// -------
+/// Tuple[float, float]
+///     The amplitude and phase.
 fn goertzel(x: Vec<f64>, f: f64) -> PyResult<(f64, f64)> {
     let x_array: Array1<f64> = Array::from(x);
     let (amp, phase) = _goertzel(&x_array, f);
