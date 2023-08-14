@@ -1,0 +1,16 @@
+[package]
+name = "fastgoertzel"
+description = "Implementation of Goertzel algorithm written in Rust"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+license = "LICENSE"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "fastgoertzel"
+crate-type = ["cdylib"]
+
+[dependencies]
+ndarray = "0.15.6"
+pyo3 = "0.19.0"
