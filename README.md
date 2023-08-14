@@ -3,7 +3,7 @@
 
 <!-- start here -->
 
-fastgoertzel
+fastgoertzel ![GitHub Actions](https://github.com/0zean/fastgoertzel/actions/workflows/CI.yml/badge.svg)
 ============
 
 A Python implementation of the Goertzel algorithm built using `Rust` for improved run time and efficiency on large datasets and loops.
