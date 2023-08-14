@@ -25,18 +25,19 @@ Using `pip install`:
 $ pip install fastgoertzel
 ```
 
-Using `poetry install` after cloning repository:
+Using `maturin` after cloning repository:
 ```bash
 $ git clone git://github.com/0zean/fastgoertzel.git
 $ cd fastgoertzel
-$ poetry install
+$ maturin develop
 ```
 
 ## Usage
 ```python
 import numpy as np
 import pandas as pd
-from fastgoertzel import Goertzel as G
+
+import fastgoertzel as G
 
 
 def wave(amp, freq, phase, x):
@@ -46,16 +47,8 @@ def wave(amp, freq, phase, x):
 x = np.arange(0, 512)
 y = wave(1, 1/128, 0, x)
 
-G = Goertzel(y, 1/128)
-
-amp, phase = G.goertzel()
+amp, phase = G.goertzel(y, 1/128)
 print(f'Goertzel Amp: {amp:.4f}, phase: {phase:.4f}')
-
-amp, phase = G.goertzelFFT()
-print(f'GoertzelFFT Amp: {amp:.4f}, phase: {phase:.4f}')
-
-amp, phase = G.goertzelIIR()
-print(f'GoertzelIIR Amp: {amp:.4f}, phase: {phase:.4f}')
 
 # Compared to max amplitude FFT output 
 ft = np.fft.fft(y)
@@ -68,4 +61,5 @@ max_ = FFT.iloc[FFT['amp'].idxmax()]
 print(f'FFT amp: {max_["amp"]:.4f}, '
         f'phase: {max_["phase"]:.4f}, '
         f'freq: {max_["freq"]:.4f}')
+
 ```
