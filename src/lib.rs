@@ -11,22 +11,26 @@ use std::f64::consts::PI;
 ///
 /// Parameters
 /// ----------
-/// x : List[float]
-///     The input data.
-/// f : float
+/// x : _ndarray_
+///     1d array of the input data.
+/// f : _float_
 ///     The frequency value.
 ///
 /// Returns
 /// -------
-/// Tuple[float, float]
+/// _Tuple[float, float]_
 ///     The amplitude and phase.
+/// -------
 fn goertzel(x: Vec<f64>, f: f64) -> PyResult<(f64, f64)> {
     let x_array: Array1<f64> = Array::from(x);
     let (amp, phase) = _goertzel(&x_array, f);
     Ok((amp, phase))
 }
 
-/// A Python module implemented in Rust.
+/// Python module implementing the Goertzel algorithm in Rust.
+/// 
+/// This module provides functions to calculate the amplitude and phase
+/// using the Goertzel algorithm.
 #[pymodule]
 fn fastgoertzel(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(goertzel, m)?)?;
