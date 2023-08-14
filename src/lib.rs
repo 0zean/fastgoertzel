@@ -20,7 +20,17 @@ use std::f64::consts::PI;
 /// -------
 /// _Tuple[float, float]_
 ///     The amplitude and phase.
-/// -------
+/// 
+/// Examples
+/// --------
+/// >>> import numpy as np
+/// >>> import fastgoertzel as G
+/// >>> def wave(amp, freq, phase, x):
+/// >>>     return amp * np.sin(2*np.pi * freq * x + phase)
+/// >>> x = np.arange(0, 512)
+/// >>> y = wave(1, 1/128, 0, x)
+/// >>> amp, phase = G.goertzel(y, 1/128)
+/// >>> print(f'Goertzel Amp: {amp:.4f}, phase: {phase:.4f}')
 fn goertzel(x: Vec<f64>, f: f64) -> PyResult<(f64, f64)> {
     let x_array: Array1<f64> = Array::from(x);
     let (amp, phase) = _goertzel(&x_array, f);
