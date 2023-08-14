@@ -13,7 +13,7 @@ A Python implementation of the Goertzel algorithm built using `Rust` for improve
 
 - [ ] Improved speed.
 - [ ] Implement benchmarking for speed comparison
-- [ ] add IIR and k-th FTT implementation of Goertzel.
+- [ ] Add IIR and k-th FTT implementation of Goertzel.
 - [ ] Add support for sampling rate.
 
 ## Installation
