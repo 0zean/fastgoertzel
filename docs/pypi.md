@@ -2,7 +2,7 @@
 
 <!-- start here -->
 
-fastgoertzel
+fastgoertzel ![GitHub Actions](https://github.com/0zean/fastgoertzel/actions/workflows/CI.yml/badge.svg)
 ============
 
 A Python implementation of the Goertzel algorithm built using `Rust` for improved run time and efficiency on large datasets and loops.
@@ -10,8 +10,8 @@ A Python implementation of the Goertzel algorithm built using `Rust` for improve
 
 ## To-Do:
 
-- [ ] Improved speed.
-- [ ] Implement benchmarking for speed comparison
+- [x] ~~Improved speed.~~ (Significantly increased speed by using numpy arrays).
+- [ ] Implement benchmarking for speed comparison.
 - [ ] Add IIR and k-th FTT implementation of Goertzel.
 - [ ] Add support for sampling rate.
 
