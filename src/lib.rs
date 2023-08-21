@@ -1,7 +1,10 @@
 extern crate ndarray;
+extern crate numpy;
 use pyo3::prelude::*;
-use ndarray::prelude::*;
-use ndarray::Array;
+use pyo3::exceptions;
+// use ndarray::prelude::*;
+// use ndarray::Array;
+use numpy::PyArray1;
 use std::f64::consts::PI;
 
 #[pyfunction]
@@ -31,9 +34,11 @@ use std::f64::consts::PI;
 /// >>> y = wave(1, 1/128, 0, x)
 /// >>> amp, phase = G.goertzel(y, 1/128)
 /// >>> print(f'Goertzel Amp: {amp:.4f}, phase: {phase:.4f}')
-fn goertzel(x: Vec<f64>, f: f64) -> PyResult<(f64, f64)> {
-    let x_array: Array1<f64> = Array::from(x);
-    let (amp, phase) = _goertzel(&x_array, f);
+fn goertzel(x: &PyAny, f: f64) -> PyResult<(f64, f64)> {
+    let x_array = x.downcast::<PyArray1<f64>>()
+        .map_err(|_| PyErr::new::<exceptions::PyTypeError, _>("Input x must be a 1-dimensional numpy array"))?;
+    
+    let (amp, phase) = unsafe {_goertzel(&x_array, f)};
     Ok((amp, phase))
 }
 
@@ -47,7 +52,8 @@ fn fastgoertzel(_py: Python, m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
-fn _goertzel(x: &Array1<f64>, f: f64) -> (f64, f64) {
+#[inline]
+unsafe fn _goertzel(x: &PyArray1<f64>, f: f64) -> (f64, f64) {
     let n = x.len();
     let k = (f * n as f64) as usize;
     
@@ -59,7 +65,7 @@ fn _goertzel(x: &Array1<f64>, f: f64) -> (f64, f64) {
     let mut z2 = 0.0;
 
     for i in 0..n {
-        let z0 = x[i] + c * z1 - z2;
+        let z0 = x.uget(i) + c * z1 - z2;
         z2 = z1;
         z1 = z0;
     }
