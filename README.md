@@ -12,7 +12,7 @@ A Python implementation of the Goertzel algorithm built using `Rust` for improve
 ## To-Do:
 
 - [x] ~~Improved speed.~~ (Significantly increased speed by using numpy arrays).
-- [ ] Implement benchmarking for speed comparison.
+- [x] Implement benchmarking for speed comparison. (fastgoertzel is ~75 times faster than native python)
 - [ ] Add IIR and k-th FTT implementation of Goertzel.
 - [ ] Add support for sampling rate.
 
