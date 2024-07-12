@@ -155,7 +155,7 @@ jobs:
 
   release:
     name: Release
-    permission:
+    permissions:
       id-token: write
     environment: release
     runs-on: ubuntu-latest
