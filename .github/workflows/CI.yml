@@ -114,7 +114,6 @@ jobs:
           name: wheels
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
-        env:
         with:
           command: upload
           args: --skip-existing *
