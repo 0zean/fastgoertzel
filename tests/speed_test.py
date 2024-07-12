@@ -33,16 +33,13 @@ def py_goertzel(x, f):
 x_test = np.arange(0, 10**7)
 y_test = wave(1, 1/128, 0, x_test)
 
-# Time the sum_array function
 time_py = timeit.timeit('py_goertzel(y_test, 1/128)', globals=globals(), number=10)
 
-# Time the mean_array function
 time_rust = timeit.timeit('G.goertzel(y_test, 1/128)', globals=globals(), number=10)
 
 print(f"Time taken by py_goertzel: {time_py} seconds")
 print(f"Time taken by fastgoertzel: {time_rust} seconds")
 
-# Calculate the difference in time
 time_difference = time_py - time_rust
 print(f"Difference in time: {time_difference} seconds")
 print(f"fastgoertzel is {time_py / time_rust:.3} times faster")
