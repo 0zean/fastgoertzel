@@ -2,7 +2,7 @@
 name = "fastgoertzel"
 authors = ["Nicholas Picini"]
 description = "Implementation of Goertzel algorithm written in Rust"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 readme = "docs/pypi.md"
 license = "MIT"
