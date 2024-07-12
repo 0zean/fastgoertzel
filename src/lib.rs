@@ -2,8 +2,6 @@ extern crate ndarray;
 extern crate numpy;
 use pyo3::prelude::*;
 use pyo3::exceptions;
-// use ndarray::prelude::*;
-// use ndarray::Array;
 use numpy::PyArray1;
 use std::f64::consts::PI;
 
