@@ -1,2 +1,9 @@
 .python-version
 .venv
+__pycache__/
+
+*.so
+*.pyd
+build/
+dist/
+*.egg-info/
