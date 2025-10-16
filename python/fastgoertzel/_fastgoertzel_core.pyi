@@ -5,19 +5,38 @@ from numpy.typing import NDArray
 
 def goertzel(x: NDArray[np.float64], frequency: float) -> Tuple[float, float]:
     """
-    Compute amplitude and phase using Goertzel algorithm.
-
+    Compute amplitude and phase using the Goertzel algorithm.
+        
     Parameters
     ----------
-    x : NDArray[np.float64]
-        Input signal array
+    x : numpy.ndarray
+        1-dimensional array of input samples
     frequency : float
-        Normalized frequency (0 to 1)
-
+        Normalized frequency to detect (0 to 1, where 1 = sampling rate)
+        
     Returns
     -------
-    Tuple[float, float]
-        (amplitude, phase) tuple
+    tuple[float, float]
+        (amplitude, phase) where phase is in radians
+        
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import fastgoertzel
+    >>> 
+    >>> # Generate test signal
+    >>> t = np.arange(0, 512)
+    >>> freq = 1/128  # Normalized frequency
+    >>> signal = np.sin(2 * np.pi * freq * t)
+    >>> 
+    >>> # Detect frequency
+    >>> amp, phase = fastgoertzel.goertzel(signal, freq)
+    >>> print(f"Amplitude: {amp:.4f}, Phase: {phase:.4f}")
+    
+    Notes
+    -----
+    The Goertzel algorithm is particularly efficient when detecting
+    a small number of frequencies compared to computing a full FFT.
     """
     ...
 
@@ -25,19 +44,19 @@ def goertzel_batch(
     x: NDArray[np.float64], frequencies: NDArray[np.float64]
 ) -> NDArray[np.float64]:
     """
-    Process multiple frequencies in batch.
-
+    Process multiple frequencies in a single call.
+        
     Parameters
     ----------
-    x : NDArray[np.float64]
-        Input signal array
-    frequencies : NDArray[np.float64]
-        Array of normalized frequencies
-
+    x : numpy.ndarray
+        1-dimensional array of input samples
+    frequencies : numpy.ndarray
+        1-dimensional array of normalized frequencies
+        
     Returns
     -------
-    NDArray[np.float64]
-        2D array of shape (n_frequencies, 2)
+    numpy.ndarray
+        2D array of shape (n_frequencies, 2) with amplitudes and phases
     """
     ...
 
