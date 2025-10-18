@@ -6,7 +6,6 @@ install:
 	uv sync --frozen
 	uv run python -m build -o dist/
 	uv pip install dist/fastgoertzel-*.whl
-	uv run pip install numpy pytest ruff
 
 # Format code with Black and isort
 format:
