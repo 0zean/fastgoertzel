@@ -4,7 +4,7 @@ import pytest
 
 
 def wave(amp: float, freq: float, phase: float, x: np.ndarray) -> np.ndarray:
-    signal = amp * np.sin(2*np.pi * freq * x + phase)
+    signal = amp * np.sin(2 * np.pi * freq * x + phase)
     return signal
 
 
