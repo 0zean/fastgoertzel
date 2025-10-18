@@ -3,6 +3,11 @@ import numpy as np
 import pytest
 
 
+def wave(amp: float, freq: float, phase: float, x: np.ndarray) -> np.ndarray:
+    signal = amp * np.sin(2*np.pi * freq * x + phase)
+    return signal
+
+
 class TestGoertzel:
     def test_pure_sine_wave(self):
         """Test detection of a pure sine wave."""
@@ -13,7 +18,7 @@ class TestGoertzel:
         amplitude_expected = 2.5
         phase_expected = np.pi / 4
 
-        signal = amplitude_expected * np.sin(2 * np.pi * frequency * t + phase_expected)
+        signal = wave(amp=amplitude_expected, freq=frequency, phase=phase_expected, x=t)
 
         # Run Goertzel algorithm
         amp, phase = fastgoertzel.goertzel(signal, frequency)
@@ -30,11 +35,11 @@ class TestGoertzel:
         # Create composite signal
         freqs = [1 / 256, 1 / 128, 1 / 64]
         amps = [1.0, 2.0, 0.5]
-        signal = sum(a * np.sin(2 * np.pi * f * t) for a, f in zip(amps, freqs))
+        signal = sum([wave(amp=a, freq=f, phase=0, x=t) for a, f in zip(amps, freqs)])
 
         # Test each frequency
         for expected_amp, freq in zip(amps, freqs):
-            amp, _ = fastgoertzel.goertzel(signal, freq)
+            amp, _ = fastgoertzel.goertzel(np.asarray(signal, dtype=np.float64), freq)
             assert np.abs(amp - expected_amp) < 0.1
 
     def test_batch_processing(self):
