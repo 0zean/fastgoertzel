@@ -20,11 +20,13 @@ ext_modules = [
         extra_compile_args=[
             "-O3",                # Maximum optimization
             "-march=native",      # Use CPU-specific instructions
+            "-mavx2",             # Enable AVX2
             "-ffast-math",        # Fast floating-point (be careful!)
             "-Wall",              # All warnings
             "-Wextra",            # Extra warnings
             "-ffast-math",        # Fast floating-point
             "-funroll-loops",     # Unroll loops
+            "-flto",              # Link-time optimization
             "-ftree-vectorize",   # Auto-vectorization
             "-fopenmp",           # OpenMP parallelization 
         ]
