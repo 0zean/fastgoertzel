@@ -21,7 +21,6 @@ ext_modules = [
             "-O3",                # Maximum optimization
             "-march=native",      # Use CPU-specific instructions
             "-mavx2",             # Enable AVX2
-            "-ffast-math",        # Fast floating-point (be careful!)
             "-Wall",              # All warnings
             "-Wextra",            # Extra warnings
             "-ffast-math",        # Fast floating-point
@@ -31,7 +30,13 @@ ext_modules = [
             "-fopenmp",           # OpenMP parallelization 
         ]
         if sys.platform != "win32"
-        else ["/O2"],
+        else [
+            "/O2",                  # Maximum optimization
+            "/arch:AVX2",           # Enable AVX2
+            "/openmp:experimental", # OpenMP parallelization
+            "/fp:fast",             # Fast floating-point
+            "/Qpar",                # Auto-parallelization
+        ],
         define_macros=[("VERSION_INFO", __version__)],
     ),
 ]

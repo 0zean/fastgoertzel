@@ -47,7 +47,8 @@ std::tuple<double, double> goertzel_avx2(
     }
 
     const size_t k = static_cast<size_t>(frequency * length);
-    const double omega = 2.0 * GoertzelAlgorithm::PI * k / static_cast<double>(length);
+    static constexpr double PI = 3.141592653589793238462643383279502884;
+    const double omega = 2.0 * PI * k / static_cast<double>(length);
     const double cos_omega = std::cos(omega);
     const double sin_omega = std::sin(omega);
     const double coeff = 2.0 * cos_omega;
