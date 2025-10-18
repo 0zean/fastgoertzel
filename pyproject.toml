@@ -12,7 +12,7 @@ name = "fastgoertzel"
 version = "0.1.0"
 description = "High-performance Goertzel algorithm implementation"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
     {name = "Your Name", email = "your.email@example.com"},
@@ -23,7 +23,7 @@ classifiers = [
     "Programming Language :: C++",
 ]
 dependencies = [
-    "numpy>=1.19.0",
+    "numpy>=2.2.6",
 ]
 
 [project.optional-dependencies]
@@ -31,5 +31,5 @@ test = ["pytest>=6.0", "pytest-benchmark"]
 dev = ["black", "mypy", "ruff"]
 
 [tool.cibuildwheel]
-build = "cp37-* cp38-* cp39-* cp310-* cp311-*"
+build = "cp38-* cp39-* cp310-* cp311-*"
 skip = "*-musllinux_i686"
