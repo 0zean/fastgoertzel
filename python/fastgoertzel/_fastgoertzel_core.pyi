@@ -60,4 +60,28 @@ def goertzel_batch(
     """
     ...
 
+def goertzel_sliding_batch(
+    x: NDArray[np.float64],
+    window_size: int,
+    frequencies: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """
+    Process sliding windows of data for multiple frequencies.
+        
+    Parameters
+    ----------
+    x : numpy.ndarray
+        1-dimensional array of input samples
+    window_size : int
+        Size of the sliding window
+    frequencies : numpy.ndarray
+        1-dimensional array of normalized frequencies
+    
+    Returns
+    -------
+    numpy.ndarray
+        Array of shape (n_windows, n_frequencies, 2) with amplitudes and phases
+    """
+    ...
+
 __version__: str
