@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=6.0", "pytest-benchmark"]
-dev = ["black", "mypy", "ruff"]
+dev = ["mypy", "ruff"]
 
 [tool.cibuildwheel]
 build = "cp38-* cp39-* cp310-* cp311-*"

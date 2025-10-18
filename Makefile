@@ -4,6 +4,7 @@
 install:
 	@echo "🚀 Creating virtual environment using uv"
 	uv sync --frozen
+	uv run pip install numpy pytest ruff fastgoertzel
 
 # Format code with Black and isort
 format:
