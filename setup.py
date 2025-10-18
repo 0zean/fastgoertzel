@@ -37,6 +37,9 @@ ext_modules = [
             "/fp:fast",             # Fast floating-point
             "/Qpar",                # Auto-parallelization
         ],
+        extra_link_args=[
+            "-fopenmp"
+        ] if sys.platform != "win32" else [],
         define_macros=[("VERSION_INFO", __version__)],
     ),
 ]
