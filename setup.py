@@ -57,7 +57,7 @@ setup(
     zip_safe=False,
     python_requires=">=3.8",
     install_requires=[
-        "numpy>=2.2.6",
+        "numpy==2.2.6",
     ],
     extras_require={
         "dev": [
