@@ -55,15 +55,15 @@ setup(
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
-    python_requires=">=3.8",
+    python_requires=">=3.10",
     install_requires=[
-        "numpy==2.2.6",
+        "numpy>=2.2.6",
     ],
     extras_require={
         "dev": [
             "pytest>=6.0",
             "pytest-benchmark",
-            "black",
+            "ruff",
             "mypy",
             "sphinx",
         ],
@@ -73,8 +73,6 @@ setup(
         "Intended Audience :: Developers",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: C++",
