@@ -4,7 +4,9 @@
 install:
 	@echo "🚀 Creating virtual environment using uv"
 	uv sync --frozen
-	uv run pip install numpy pytest ruff fastgoertzel
+	uv run python -m build -o dist/
+	uv pip install dist/fastgoertzel-*.whl
+	uv run pip install numpy pytest ruff
 
 # Format code with Black and isort
 format:
