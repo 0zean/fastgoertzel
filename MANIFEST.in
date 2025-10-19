@@ -1,4 +1,4 @@
-include README.md LICENSE
+include README.md LICENSE docs/pypi.md
 include pyproject.toml
 recursive-include src *.cpp *.hpp
 recursive-include python *.py *.pyi
