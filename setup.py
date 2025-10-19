@@ -51,7 +51,7 @@ setup(
     author_email="pd1138@protonmail.com",
     url="https://github.com/0zean/fastgoertzel_cpp",
     description="High-performance Goertzel algorithm implementation",
-    long_description=open("README.md").read(),
+    long_description=open("docs/pypi.md").read(),
     long_description_content_type="text/markdown",
     packages=find_packages(where="python"),
     package_dir={"": "python"},
