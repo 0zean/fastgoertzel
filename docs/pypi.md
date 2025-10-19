@@ -2,16 +2,18 @@
 
 <!-- start here -->
 
-fastgoertzel ![GitHub Actions](https://github.com/0zean/fastgoertzel/actions/workflows/CI.yml/badge.svg)
+fastgoertzel ![GitHub Actions](https://github.com/0zean/fastgoertzel/actions/workflows/ci.yml/badge.svg)
 ============
 
-A Python implementation of the Goertzel algorithm built using `Rust` for improved run time and efficiency on large datasets and loops.
+
+A Python implementation of the Goertzel algorithm built using `C++` for improved run time and efficiency on large datasets and loops.
 
 
 ## To-Do:
 
 - [x] ~~Improved speed.~~ (Significantly increased speed by using numpy arrays).
 - [x] Implement benchmarking for speed comparison. (fastgoertzel is ~75 times faster than native python)
+- [x] Implement batch processing for multiple frequencies.
 - [ ] Add IIR and k-th FTT implementation of Goertzel.
 - [ ] Add support for sampling rate.
 
@@ -24,11 +26,11 @@ Using `pip install`:
 $ pip install fastgoertzel
 ```
 
-Using `maturin` after cloning repository:
+Using `setup.py` after cloning repository:
 ```bash
 $ git clone git://github.com/0zean/fastgoertzel.git
 $ cd fastgoertzel
-$ maturin develop
+$ python -m build
 ```
 
 ## Usage
@@ -36,7 +38,7 @@ $ maturin develop
 import numpy as np
 import pandas as pd
 
-import fastgoertzel as G
+import fastgoertzel as fg
 
 
 def wave(amp, freq, phase, x):
@@ -46,7 +48,7 @@ def wave(amp, freq, phase, x):
 x = np.arange(0, 512)
 y = wave(1, 1/128, 0, x)
 
-amp, phase = G.goertzel(y, 1/128)
+amp, phase = fg.goertzel(y, 1/128)
 print(f'Goertzel Amp: {amp:.4f}, phase: {phase:.4f}')
 
 # Compared to max amplitude FFT output 

@@ -1,8 +1,9 @@
-/target
+*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
 .pytest_cache/
+.ruff_cache/
 *.py[cod]
 
 # C extensions
@@ -68,6 +69,7 @@ docs/_build/
 
 # VSCode
 .vscode/
+.vs
 
 # Pyenv
 .python-version
