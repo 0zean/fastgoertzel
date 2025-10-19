@@ -5,7 +5,7 @@ import pybind11
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import Extension, find_packages, setup
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 ext_modules = [
     Pybind11Extension(
@@ -69,6 +69,7 @@ setup(
             "ruff",
             "mypy",
             "sphinx",
+            "bumpver",
         ],
     },
     classifiers=[

@@ -247,7 +247,7 @@ PYBIND11_MODULE(_fastgoertzel_core, m) {
         )pbdoc");
 
     // Add version info
-    #define VERSION_INFO "0.1.0"
+    #define VERSION_INFO "1.0.0"
     #ifdef VERSION_INFO
         m.attr("__version__") = VERSION_INFO;
     #else
