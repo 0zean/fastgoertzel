@@ -27,8 +27,6 @@ elif system == "darwin":
     # If you install LLVM with OpenMP via Homebrew, you need to point to it explicitly
     extra_compile_args = [
         "-O3",
-        "-march=native",
-        "-mavx2",
         "-Wall",
         "-Wextra",
         "-ffast-math",
