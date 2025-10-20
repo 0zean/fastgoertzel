@@ -7,6 +7,58 @@ from setuptools import Extension, find_packages, setup
 
 __version__ = "1.0.0"
 
+system = sys.platform.lower()
+
+extra_compile_args = []
+extra_link_args = []
+
+if system == "win32":
+    extra_compile_args = [
+        "/O2",                  # Optimize for speed
+        "/arch:AVX2",           # Enable AVX2
+        "/openmp:experimental", # OpenMP 4.0 support (MSVC 2022+)
+        "/fp:fast",             # Fast floating-point math
+        "/Qpar",                # Auto-parallelization
+    ]
+    extra_link_args = []
+
+elif system == "darwin":
+    # Apple Clang does NOT support OpenMP by default
+    # If you install LLVM with OpenMP via Homebrew, you need to point to it explicitly
+    extra_compile_args = [
+        "-O3",
+        "-march=native",
+        "-mavx2",
+        "-Wall",
+        "-Wextra",
+        "-ffast-math",
+        "-funroll-loops",
+        "-flto",
+        "-ftree-vectorize",
+    ]
+    extra_link_args = ["-flto"]
+
+    # Optional OpenMP support (only if user installed LLVM via Homebrew)
+    # Uncomment these if you know your build env supports it:
+    # extra_compile_args += ["-Xpreprocessor", "-fopenmp", "-I/usr/local/include"]
+    # extra_link_args += ["-lomp", "-L/usr/local/lib"]
+
+else:
+    # Linux / other Unix-like systems
+    extra_compile_args = [
+        "-O3",
+        "-march=native",
+        "-mavx2",
+        "-Wall",
+        "-Wextra",
+        "-ffast-math",
+        "-funroll-loops",
+        "-flto",
+        "-ftree-vectorize",
+        "-fopenmp",  # OpenMP on GCC/Clang
+    ]
+    extra_link_args = ["-fopenmp", "-flto"] 
+
 ext_modules = [
     Pybind11Extension(
         "fastgoertzel._fastgoertzel_core",
@@ -17,29 +69,8 @@ ext_modules = [
         ],
         cxx_std=17,  # Use C++17 standard
         # Optimization flags
-        extra_compile_args=[
-            "-O3",                # Maximum optimization
-            "-march=native",      # Use CPU-specific instructions
-            "-mavx2",             # Enable AVX2
-            "-Wall",              # All warnings
-            "-Wextra",            # Extra warnings
-            "-ffast-math",        # Fast floating-point
-            "-funroll-loops",     # Unroll loops
-            "-flto",              # Link-time optimization
-            "-ftree-vectorize",   # Auto-vectorization
-            "-fopenmp",           # OpenMP parallelization 
-        ]
-        if sys.platform != "win32"
-        else [
-            "/O2",                  # Maximum optimization
-            "/arch:AVX2",           # Enable AVX2
-            "/openmp:experimental", # OpenMP parallelization
-            "/fp:fast",             # Fast floating-point
-            "/Qpar",                # Auto-parallelization
-        ],
-        extra_link_args=[
-            "-fopenmp"
-        ] if sys.platform != "win32" else [],
+        extra_compile_args=extra_compile_args,
+        extra_link_args=extra_link_args,
         define_macros=[("VERSION_INFO", __version__)],
     ),
 ]
