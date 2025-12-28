@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 
 import numpy as np
 import pybind11
@@ -9,16 +10,19 @@ __version__ = "1.0.1"
 
 system = sys.platform.lower()
 
+dir = Path(__file__).parent
+long_description = (dir / "docs" / "pypi.md").read_text()
+
 extra_compile_args = []
 extra_link_args = []
 
 if system == "win32":
     extra_compile_args = [
-        "/O2",                  # Optimize for speed
-        "/arch:AVX2",           # Enable AVX2
-        "/openmp:experimental", # OpenMP 4.0 support (MSVC 2022+)
-        "/fp:fast",             # Fast floating-point math
-        "/Qpar",                # Auto-parallelization
+        "/O2",  # Optimize for speed
+        "/arch:AVX2",  # Enable AVX2
+        "/openmp:experimental",  # OpenMP 4.0 support (MSVC 2022+)
+        "/fp:fast",  # Fast floating-point math
+        "/Qpar",  # Auto-parallelization
     ]
     extra_link_args = []
 
@@ -55,7 +59,7 @@ else:
         "-ftree-vectorize",
         "-fopenmp",  # OpenMP on GCC/Clang
     ]
-    extra_link_args = ["-fopenmp", "-flto"] 
+    extra_link_args = ["-fopenmp", "-flto"]
 
 ext_modules = [
     Pybind11Extension(
@@ -78,9 +82,9 @@ setup(
     version=__version__,
     author="Nicholas Picini",
     author_email="pd1138@protonmail.com",
-    url="https://github.com/0zean/fastgoertzel_cpp",
+    url="https://github.com/0zean/fastgoertzel",
     description="High-performance Goertzel algorithm implementation",
-    long_description=open("docs/pypi.md").read(),
+    long_description=long_description,
     long_description_content_type="text/markdown",
     packages=find_packages(where="python"),
     package_dir={"": "python"},
