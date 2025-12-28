@@ -6,7 +6,7 @@ import pybind11
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import Extension, find_packages, setup
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 system = sys.platform.lower()
 
