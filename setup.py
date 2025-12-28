@@ -5,7 +5,7 @@ import pybind11
 from pybind11.setup_helpers import Pybind11Extension, build_ext
 from setuptools import Extension, find_packages, setup
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 system = sys.platform.lower()
 
@@ -108,6 +108,8 @@ setup(
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Programming Language :: C++",
         "Topic :: Scientific/Engineering",
     ],
