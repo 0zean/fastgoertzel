@@ -15,7 +15,7 @@ A Python implementation of the Goertzel algorithm built using `C++` for improved
 - [x] Implement benchmarking for speed comparison. (fastgoertzel is ~75 times faster than native python)
 - [x] Implement batch processing for multiple frequencies.
 - [ ] Add IIR and k-th FTT implementation of Goertzel.
-- [ ] Add support for sampling rate.
+- [X] Add support for sampling rate.
 
 ## Installation
 

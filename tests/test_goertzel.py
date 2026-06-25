@@ -78,3 +78,63 @@ class TestGoertzel:
         amp, phase = fastgoertzel.goertzel(signal, 0.1)
         assert np.isfinite(amp)
         assert np.isfinite(phase)
+
+    def test_goertzel_hz_matches_normalized_frequency(self):
+        sample_rate = 8000
+        n_samples = 1024
+        frequency_hz = 1000
+
+        signal = np.random.randn(n_samples)
+
+        amp_hz, phase_hz = fastgoertzel.goertzel_hz(
+            signal,
+            frequency_hz,
+            sample_rate,
+        )
+
+        amp_norm, phase_norm = fastgoertzel.goertzel(
+            signal,
+            frequency_hz / sample_rate,
+        )
+
+        assert np.isclose(amp_hz, amp_norm)
+        assert np.isclose(phase_hz, phase_norm)
+
+    def test_goertzel_batch_hz_matches_normalized_frequency(self):
+        sample_rate = 8000
+        frequencies_hz = np.array([500, 1000, 1500], dtype=np.float64)
+        signal = np.random.randn(1024)
+
+        result_hz = fastgoertzel.goertzel_batch_hz(
+            signal,
+            frequencies_hz,
+            sample_rate,
+        )
+
+        result_norm = fastgoertzel.goertzel_batch(
+            signal,
+            frequencies_hz / sample_rate,
+        )
+
+        assert np.allclose(result_hz, result_norm)
+
+    def test_goertzel_sliding_batch_hz_matches_normalized_frequency(self):
+        sample_rate = 8000
+        window_size = 256
+        frequencies_hz = np.array([500, 1000], dtype=np.float64)
+        signal = np.random.randn(1024)
+
+        result_hz = fastgoertzel.goertzel_sliding_batch_hz(
+            signal,
+            window_size,
+            frequencies_hz,
+            sample_rate,
+        )
+
+        result_norm = fastgoertzel.goertzel_sliding_batch(
+            signal,
+            window_size,
+            frequencies_hz / sample_rate,
+        )
+
+        assert np.allclose(result_hz, result_norm)
