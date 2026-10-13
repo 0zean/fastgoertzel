@@ -1,4 +1,3 @@
-*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -24,7 +23,6 @@ lib64/
 parts/
 sdist/
 var/
-include/
 man/
 venv/
 *.egg-info/
@@ -73,3 +71,6 @@ docs/_build/
 
 # Pyenv
 .python-version
+# Benchmark reports
+bench*.json
+CppProperties.json

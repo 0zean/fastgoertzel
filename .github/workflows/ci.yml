@@ -1,35 +1,85 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [master, main, dev]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [3.11]
-
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
 
-      - name: Set up Python
-        run: uv python install ${{ matrix.python-version }}
+      - name: Build extension and install (editable) with locked dependencies
+        run: uv sync --locked
 
-      - name: Install dependencies
-        run: make install
+      - name: Lint
+        run: uv run ruff check .
 
-      - name: Run formatting
-        run: make format
+      - name: Format check
+        run: uv run ruff format --check .
 
-      - name: Run linting
-        run: make lint
+      - name: Test
+        run: uv run pytest -q
 
-      - name: Set PYTHONPATH
-        run: echo "PYTHONPATH=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+      - name: Benchmark smoke test
+        run: uv run python benchmarks/benchmark.py --quick --no-python --no-threads --no-latency
 
-      - name: Run tests
-        run: make test
+  sanitizers:
+    name: ASan + UBSan (Linux, GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build with sanitizers
+        env:
+          CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
+          CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
+          LDFLAGS: -fsanitize=address,undefined
+        run: |
+          python -m pip install --upgrade pip
+          pip install pybind11 numpy pytest
+          pip install --no-build-isolation -v .
+      - name: Run tests under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          export LD_PRELOAD=$(gcc -print-file-name=libasan.so)
+          pytest -q -p no:cacheprovider
+
+  wheel-smoke:
+    name: cibuildwheel smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test one wheel per platform
+        uses: pypa/cibuildwheel@v3.1.4
+        env:
+          CIBW_BUILD: cp312-*
+          CIBW_ARCHS_LINUX: x86_64
+          CIBW_ARCHS_MACOS: arm64
+          CIBW_ARCHS_WINDOWS: AMD64

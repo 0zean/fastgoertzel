@@ -1,120 +1,87 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Build script for the fastgoertzel C++ extension.
+
+All package metadata lives in pyproject.toml (setuptools ignores metadata passed here
+when a [project] table exists). This file only describes how to compile the extension.
+
+Flag policy (PLAN.md, section 2.4):
+  * no -march=native / /arch:AVX2 in wheels: they crash on CPUs without those features
+    and the scalar kernel gains nothing from them;
+  * no -ffast-math / /fp:fast: on GCC < 13 fast-math sets FTZ/DAZ for the whole process
+    at import time, and it changes results;
+  * FMA contraction is allowed (it only improves accuracy);
+  * OpenMP where the toolchain provides it (GCC, Clang, MSVC); Apple Clang ships without
+    it, so macOS builds are single-threaded unless FASTGOERTZEL_OPENMP_FLAGS is set.
+
+Environment overrides for source builds:
+  FASTGOERTZEL_NATIVE=1          add -march=native (never used for published wheels)
+  FASTGOERTZEL_OPENMP_FLAGS=...  extra compile *and* link flags for OpenMP, e.g.
+                                 "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include
+                                  -L/opt/homebrew/opt/libomp/lib -lomp" on macOS with Homebrew.
+"""
+
+import os
+import re
 import sys
 from pathlib import Path
 
-import numpy as np
-import pybind11
 from pybind11.setup_helpers import Pybind11Extension, build_ext
-from setuptools import Extension, find_packages, setup
+from setuptools import setup
 
-__version__ = "1.0.2"
+ROOT = Path(__file__).parent
 
-system = sys.platform.lower()
 
-dir = Path(__file__).parent
-long_description = (dir / "docs" / "pypi.md").read_text()
+def read_version() -> str:
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    match = re.search(r'^version\s*=\s*"([^"]+)"', text, flags=re.MULTILINE)
+    if not match:
+        raise RuntimeError("could not find [project].version in pyproject.toml")
+    return match.group(1)
 
-extra_compile_args = []
-extra_link_args = []
 
-if system == "win32":
-    extra_compile_args = [
-        "/O2",  # Optimize for speed
-        "/arch:AVX2",  # Enable AVX2
-        "/openmp:experimental",  # OpenMP 4.0 support (MSVC 2022+)
-        "/fp:fast",  # Fast floating-point math
-        "/Qpar",  # Auto-parallelization
-    ]
-    extra_link_args = []
+def compiler_flags() -> tuple[list[str], list[str]]:
+    compile_args: list[str] = []
+    link_args: list[str] = []
 
-elif system == "darwin":
-    # Apple Clang does NOT support OpenMP by default
-    # If you install LLVM with OpenMP via Homebrew, you need to point to it explicitly
-    extra_compile_args = [
-        "-O3",
-        "-Wall",
-        "-Wextra",
-        "-ffast-math",
-        "-funroll-loops",
-        "-flto",
-        "-ftree-vectorize",
-    ]
-    extra_link_args = ["-flto"]
+    if sys.platform == "win32":
+        compile_args += ["/O2", "/openmp", "/fp:contract"]
+    else:
+        compile_args += ["-O3", "-Wall", "-Wextra", "-Wpedantic", "-ffp-contract=fast"]
+        if sys.platform != "darwin":
+            compile_args.append("-fopenmp")
+            link_args.append("-fopenmp")
 
-    # Optional OpenMP support (only if user installed LLVM via Homebrew)
-    # Uncomment these if you know your build env supports it:
-    # extra_compile_args += ["-Xpreprocessor", "-fopenmp", "-I/usr/local/include"]
-    # extra_link_args += ["-lomp", "-L/usr/local/lib"]
+    if os.environ.get("FASTGOERTZEL_NATIVE") == "1" and sys.platform != "win32":
+        compile_args.append("-march=native")
 
-else:
-    # Linux / other Unix-like systems
-    extra_compile_args = [
-        "-O3",
-        "-march=native",
-        "-mavx2",
-        "-Wall",
-        "-Wextra",
-        "-ffast-math",
-        "-funroll-loops",
-        "-flto",
-        "-ftree-vectorize",
-        "-fopenmp",  # OpenMP on GCC/Clang
-    ]
-    extra_link_args = ["-fopenmp", "-flto"]
+    extra_openmp = os.environ.get("FASTGOERTZEL_OPENMP_FLAGS")
+    if extra_openmp:
+        compile_args += extra_openmp.split()
+        link_args += extra_openmp.split()
+
+    return compile_args, link_args
+
+
+extra_compile_args, extra_link_args = compiler_flags()
 
 ext_modules = [
     Pybind11Extension(
         "fastgoertzel._fastgoertzel_core",
-        ["src/python_bindings.cpp", "src/goertzel.cpp"],
-        include_dirs=[
-            "src",
-            np.get_include(),
-        ],
-        cxx_std=17,  # Use C++17 standard
-        # Optimization flags
+        ["src/python_bindings.cpp"],
+        include_dirs=["src"],
+        cxx_std=17,
         extra_compile_args=extra_compile_args,
         extra_link_args=extra_link_args,
-        define_macros=[("VERSION_INFO", __version__)],
+        # Unquoted on purpose: python_bindings.cpp stringifies it.
+        define_macros=[("VERSION_INFO", read_version())],
     ),
 ]
 
 setup(
-    name="fastgoertzel",
-    version=__version__,
-    author="Nicholas Picini",
-    author_email="pd1138@protonmail.com",
-    url="https://github.com/0zean/fastgoertzel",
-    description="High-performance Goertzel algorithm implementation",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    packages=find_packages(where="python"),
+    packages=["fastgoertzel"],
     package_dir={"": "python"},
+    package_data={"fastgoertzel": ["*.pyi", "py.typed"]},
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext},
     zip_safe=False,
-    python_requires=">=3.10",
-    install_requires=[
-        "numpy>=2.2.6",
-    ],
-    extras_require={
-        "dev": [
-            "pytest>=6.0",
-            "pytest-benchmark",
-            "ruff",
-            "mypy",
-            "sphinx",
-            "bumpver",
-        ],
-    },
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-        "Programming Language :: Python :: 3.13",
-        "Programming Language :: C++",
-        "Topic :: Scientific/Engineering",
-    ],
 )
