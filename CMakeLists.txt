@@ -144,6 +144,11 @@ if(FASTGOERTZEL_BUILD_TESTS)
     GIT_TAG v2.4.11
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(doctest)
+  # doctest is third-party: treat its headers as system headers so our warning policy does
+  # not apply to them (MSVC 19.51 raises C5285 inside doctest.h, for example).
+  get_target_property(_doctest_includes doctest INTERFACE_INCLUDE_DIRECTORIES)
+  set_target_properties(doctest PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+                                           "${_doctest_includes}")
   enable_testing()
   add_executable(core_tests tests/cpp/test_core.cpp)
   target_link_libraries(core_tests PRIVATE fastgoertzel::core fastgoertzel_flags doctest::doctest)
