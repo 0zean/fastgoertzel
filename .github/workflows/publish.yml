@@ -75,7 +75,7 @@ jobs:
             done
           done
           if [ "$found" != "0" ]; then
-            echo "::error::Linux wheel contains AVX/AVX-512 code; the ISA policy (PLAN.md 2.4) forbids it"
+            echo "::error::Linux wheel contains AVX/AVX-512 code; the ISA policy forbids it (see the flag policy in setup.py)"
             exit 1
           fi
 

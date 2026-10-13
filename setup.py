@@ -4,7 +4,7 @@
 All package metadata lives in pyproject.toml (setuptools ignores metadata passed here
 when a [project] table exists). This file only describes how to compile the extension.
 
-Flag policy (PLAN.md, section 2.4):
+Flag policy:
   * no -march=native / /arch:AVX2 in wheels: they crash on CPUs without those features
     and the scalar kernel gains nothing from them;
   * no -ffast-math / /fp:fast: on GCC < 13 fast-math sets FTZ/DAZ for the whole process

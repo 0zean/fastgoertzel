@@ -1,6 +1,6 @@
 """Reproducible benchmark harness for fastgoertzel.
 
-Design goals (see PLAN.md, "Benchmarking methodology"):
+Design goals:
 
 * Every number is the *minimum* of ``repeat`` timing rounds, each round running
   the statement ``number`` times (chosen by ``timeit.autorange``).  The minimum

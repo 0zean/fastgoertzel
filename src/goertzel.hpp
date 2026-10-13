@@ -4,7 +4,7 @@
 //
 // This header is self-contained and has no Python dependency. The functions here
 // perform no validation and never throw; callers (the pybind11 layer) validate
-// inputs *before* entering any parallel region. See PLAN.md, section 2.1.
+// inputs *before* entering any parallel region.
 //
 // Derivation. With s[n] = x[n] + 2cos(w) s[n-1] - s[n-2], s[-1] = s[-2] = 0, and
 // w = 2*pi*k/N for integer k, the DFT coefficient is

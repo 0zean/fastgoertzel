@@ -15,9 +15,9 @@ A Python implementation of the Goertzel algorithm built using `C++` for improved
 - [x] Benchmarking for speed comparison. See [Performance](#performance) for measured, reproducible numbers. The earlier "~75x faster than native Python" figure was measured against a Python loop that indexes a NumPy array one element at a time; against an idiomatic pure-Python loop the speed-up is 10-15x, and against a vectorised NumPy single-bin DFT it is 5-8x.
 - [x] Batch processing for multiple frequencies (`goertzel_batch`, `goertzel_sliding_batch`).
 - [x] ~~Add IIR and k-th FFT implementation of Goertzel.~~ This is what the library already does: `goertzel` runs the second-order IIR Goertzel filter and evaluates the k-th DFT bin, with `k = floor(frequency * len(x))`. The two things that are genuinely missing are listed separately below.
-- [ ] Generalized Goertzel for non-integer bins: evaluate the DTFT at exactly `frequency` instead of at the nearest-below DFT bin. Planned for 2.0, see [PLAN.md](PLAN.md).
-- [ ] Streaming (stateful) filter API that keeps the IIR state between calls, for sample-by-sample or chunked input. Planned for 2.0, see [PLAN.md](PLAN.md).
-- [ ] Sampling-rate support (`fs=` keyword, frequencies in Hz). Deliberately deferred until the generalized Goertzel lands: with the current bin truncation, asking for 440 Hz at `fs=44100` with 4096 samples would silently evaluate bin 40, which is 430.7 Hz. Design in [PLAN.md](PLAN.md).
+- [ ] Generalized Goertzel for non-integer bins: evaluate the DTFT at exactly `frequency` instead of at the nearest-below DFT bin. Planned for 2.0.
+- [ ] Streaming (stateful) filter API that keeps the IIR state between calls, for sample-by-sample or chunked input. Planned for 2.0.
+- [ ] Sampling-rate support (`fs=` keyword, frequencies in Hz). Deliberately deferred until the generalized Goertzel lands: with the current bin truncation, asking for 440 Hz at `fs=44100` with 4096 samples would silently evaluate bin 40, which is 430.7 Hz.
 
 ## Important semantics of the current release
 

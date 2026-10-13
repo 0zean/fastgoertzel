@@ -8,7 +8,6 @@ All notable changes to this project are documented here. The format follows
 
 Patch release: crash safety, portable wheels, correct metadata. Results for valid inputs
 are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit on arm64).
-See `PLAN.md` for the review that motivated these changes.
 
 ### Fixed
 - `goertzel_sliding_batch` terminated the Python process for any out-of-range frequency
@@ -49,8 +48,8 @@ See `PLAN.md` for the review that motivated these changes.
 - CI runs on Linux, macOS, and Windows for Python 3.10 to 3.13, plus an ASan/UBSan job
   and a cibuildwheel smoke job; release wheels are checked for AVX code before upload and
   uploaded with PyPI trusted publishing.
-- `PLAN.md` describing the 2.0 roadmap (exact non-integer-bin frequencies, streaming
-  filter API, sampling-rate support, faster kernels).
+- README roadmap for 2.0 (exact non-integer-bin frequencies, streaming filter API,
+  sampling-rate support, faster kernels).
 
 ## [1.0.2] - 2025-12-28
 
