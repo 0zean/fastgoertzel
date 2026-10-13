@@ -43,14 +43,14 @@ NOINLINE complex<double> kernelB(const double* x, size_t n, double omega) {
 
 // C: NB independent contiguous blocks (breaks the dependency chain), generalized finish per block,
 //    combined with block twiddles. Exact for any omega, not only integer bins.
-template <int NB>
+template <std::size_t NB>
 NOINLINE complex<double> kernelC(const double* x, size_t n, double omega) {
     const size_t len = n / NB;
     const double coeff = 2.0 * std::cos(omega);
     double s1[NB], s2[NB];
-    for (int b = 0; b < NB; ++b) s1[b] = s2[b] = 0.0;
+    for (std::size_t b = 0; b < NB; ++b) s1[b] = s2[b] = 0.0;
     for (size_t i = 0; i < len; ++i) {
-        for (int b = 0; b < NB; ++b) {
+        for (std::size_t b = 0; b < NB; ++b) {
             double t = x[b * len + i] - s2[b];
             double s0 = std::fma(coeff, s1[b], t);
             s2[b] = s1[b];
@@ -60,7 +60,7 @@ NOINLINE complex<double> kernelC(const double* x, size_t n, double omega) {
     const complex<double> e_minus_jw = std::polar(1.0, -omega);
     const complex<double> finish = std::polar(1.0, -omega * static_cast<double>(len - 1));
     complex<double> X = 0.0;
-    for (int b = 0; b < NB; ++b) {
+    for (std::size_t b = 0; b < NB; ++b) {
         complex<double> Xb = finish * (s1[b] - e_minus_jw * s2[b]);
         X += std::polar(1.0, -omega * static_cast<double>(b * len)) * Xb;
     }
@@ -70,23 +70,23 @@ NOINLINE complex<double> kernelC(const double* x, size_t n, double omega) {
 }
 
 // D: M frequencies per pass (structure-of-arrays state), the batch formulation
-template <int M>
+template <std::size_t M>
 NOINLINE void kernelD(const double* x, size_t n, const double* omegas, complex<double>* out) {
     double coeff[M], s1[M], s2[M];
-    for (int m = 0; m < M; ++m) {
+    for (std::size_t m = 0; m < M; ++m) {
         coeff[m] = 2.0 * std::cos(omegas[m]);
         s1[m] = s2[m] = 0.0;
     }
     for (size_t i = 0; i < n; ++i) {
         const double xi = x[i];
-        for (int m = 0; m < M; ++m) {
+        for (std::size_t m = 0; m < M; ++m) {
             double t = xi - s2[m];
             double s0 = std::fma(coeff[m], s1[m], t);
             s2[m] = s1[m];
             s1[m] = s0;
         }
     }
-    for (int m = 0; m < M; ++m)
+    for (std::size_t m = 0; m < M; ++m)
         out[m] = complex<double>(std::cos(omegas[m]) * s1[m] - s2[m], std::sin(omegas[m]) * s1[m]);
 }
 
@@ -171,11 +171,11 @@ int main() {
     // batch: 8 frequencies, compare "8 x kernelB" against one pass with kernelD<8>
     double omegas[8];
     complex<double> outs[8];
-    for (int m = 0; m < 8; ++m)
+    for (std::size_t m = 0; m < 8; ++m)
         omegas[m] = 2.0 * PI * static_cast<double>(1000 * (m + 1)) / static_cast<double>(n);
     t = time_it(
         [&] {
-            for (int m = 0; m < 8; ++m) {
+            for (std::size_t m = 0; m < 8; ++m) {
                 outs[m] = kernelB(x.data(), n, omegas[m]);
             }
             sink += outs[7].real();
@@ -190,7 +190,7 @@ int main() {
         },
         reps);
     double maxrel = 0.0;
-    for (int m = 0; m < 8; ++m)
+    for (std::size_t m = 0; m < 8; ++m)
         maxrel = std::max(maxrel, std::abs(outs2[m] - outs[m]) / std::abs(outs[m]));
     std::printf("%-28s %7.3f ms  (1 pass, SoA)  max rel diff vs 8xB %.1e\n",
                 "batch: kernelD<8> one pass", t * 1e3, maxrel);

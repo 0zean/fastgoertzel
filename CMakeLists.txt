@@ -135,6 +135,9 @@ endif()
 # ---------------------------------------------------------------------------
 if(FASTGOERTZEL_BUILD_TESTS)
   include(FetchContent)
+  # doctest 2.4.11 still declares cmake_minimum_required(VERSION 3.0), which CMake 4 refuses
+  # to configure; this is the documented opt-in to treat it as 3.5.
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
   FetchContent_Declare(
     doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git

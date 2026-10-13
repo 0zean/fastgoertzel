@@ -49,7 +49,7 @@ cpp-test:
 
 # Static analysis of the C++ sources (needs clang-tidy and run-clang-tidy on PATH).
 tidy:
-	cmake -S . -B build/tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="$$(uv run python -m pybind11 --cmakedir)"
+	cmake -S . -B build/tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -DFASTGOERTZEL_OPENMP=OFF -Dpybind11_DIR="$$(uv run python -m pybind11 --cmakedir)"
 	run-clang-tidy -p build/tidy -quiet 'cpp/.*\.cpp$$'
 
 # Re-render the README benchmark tables from a JSON report produced by `make bench`.

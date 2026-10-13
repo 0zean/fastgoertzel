@@ -76,7 +76,8 @@ jobs:
           pip install pytest numpy
           pip install --no-index --find-links wheelhouse "fastgoertzel"
           qemu-x86_64 -cpu Nehalem "$(which python)" -c "from fastgoertzel import _core; print('kernel:', _core._kernel); assert _core._kernel == 'baseline'"
-          qemu-x86_64 -cpu Nehalem "$(which python)" -m pytest tests -q -p no:cacheprovider -x
+          qemu-x86_64 -cpu Nehalem "$(which python)" -m pytest tests -q -p no:cacheprovider -x \
+            --ignore=tests/test_properties.py --ignore=tests/test_performance.py
 
   publish:
     name: Upload to PyPI

@@ -114,8 +114,10 @@ files = ["src/fastgoertzel", "benchmarks/benchmark.py", "benchmarks/render_table
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux_i686"
 build-verbosity = 1
+# Property-based and timing tests need extra packages and are meaningless under the
+# emulation used for some targets, so the wheel smoke test runs the deterministic suite.
 test-requires = ["pytest>=7.0"]
-test-command = "pytest {project}/tests -q"
+test-command = "pytest {project}/tests -q -p no:cacheprovider --ignore={project}/tests/test_properties.py --ignore={project}/tests/test_performance.py"
 
 [tool.cibuildwheel.windows]
 # Bundle vcomp140.dll (OpenMP runtime) so the wheel imports without the VC++ redistributable.

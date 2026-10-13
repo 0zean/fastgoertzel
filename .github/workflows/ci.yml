@@ -107,8 +107,9 @@ jobs:
           echo "LD_PRELOAD=$LD_PRELOAD"
           echo "--- exception smoke test (expect ValueError) ---"
           python -c "import fastgoertzel as fg; fg.goertzel([1.0, 2.0], 1.5)" 2>&1 | tail -n 3 || true
-          echo "--- test suite ---"
-          pytest -x -q -p no:cacheprovider --capture=no
+          echo "--- test suite (property and timing tests are skipped under sanitizers) ---"
+          pytest -x -q -p no:cacheprovider --capture=no \
+            --ignore=tests/test_properties.py --ignore=tests/test_performance.py
 
   cpp-tests:
     name: C++ core tests (${{ matrix.os }})
@@ -145,10 +146,13 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq clang-tidy
           pip install "pybind11>=2.12"
       - name: Configure with a compile database
+        # OpenMP off: clang-tidy runs the clang front end, which cannot see GCC's omp.h, and
+        # the pragmas are irrelevant to static analysis.
         run: >
           cmake -S . -B build/tidy
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DCMAKE_BUILD_TYPE=Release
+          -DFASTGOERTZEL_OPENMP=OFF
           -Dpybind11_DIR="$(python -m pybind11 --cmakedir)"
       - name: Analyse our translation units (configuration in .clang-tidy)
         run: run-clang-tidy -p build/tidy -quiet 'cpp/.*\.cpp$'

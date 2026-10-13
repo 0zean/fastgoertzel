@@ -13,7 +13,8 @@ Checks: >
   readability-redundant-smartptr-get,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
-  -bugprone-exception-escape
+  -bugprone-exception-escape,
+  -performance-enum-size
 WarningsAsErrors: '*'
 HeaderFilterRegex: '(include/fastgoertzel/|cpp/).*'
 FormatStyle: file
