@@ -1,6 +1,6 @@
 # Developer shortcuts. CI runs the same commands (see .github/workflows/ci.yml).
 
-.PHONY: install build test lint format fix typecheck precommit bench latency kernel-bench wheel sdist clean check
+.PHONY: install build test lint format fix typecheck precommit bench latency cpp-test tidy readme-tables kernel-bench docs wheel sdist clean check
 
 # Create the virtual environment and build + install the extension (editable).
 install:
@@ -55,6 +55,10 @@ tidy:
 # Re-render the README benchmark tables from a JSON report produced by `make bench`.
 readme-tables:
 	uv run python benchmarks/render_tables.py bench.json --update README.md
+
+# Documentation site (Sphinx, warnings are errors as in CI). Output: docs/_build/html/index.html
+docs:
+	uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
 
 # Standalone C++ kernel micro-benchmark (no Python involved).
 kernel-bench:

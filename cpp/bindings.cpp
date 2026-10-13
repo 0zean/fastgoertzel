@@ -597,24 +597,14 @@ struct PyFilter {
 // is safe under free-threaded CPython (the flag is a no-op on GIL-enabled builds).
 PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
     m.doc() = R"pbdoc(
-        Fast Goertzel Algorithm Implementation
-        ---------------------------------------
+        Compiled core of fastgoertzel; import the public names from ``fastgoertzel``.
 
         Evaluates the discrete-time Fourier transform of a real signal at chosen
         frequencies with the (generalized) Goertzel algorithm, in C++.
 
-        .. currentmodule:: fastgoertzel
-
-        .. autosummary::
-           :toctree: _generate
-
-           goertzel
-           goertzel_complex
-           goertzel_bin
-           goertzel_batch
-           goertzel_batch_complex
-           goertzel_sliding_batch
-           GoertzelFilter
+        Functions: goertzel, goertzel_complex, goertzel_bin, goertzel_batch,
+        goertzel_batch_complex, goertzel_sliding_batch, goertzel_sliding_batch_complex.
+        Class: GoertzelFilter. Attributes: __version__, _has_openmp, _kernel.
     )pbdoc";
 
     m.def("goertzel", &goertzel, py::arg("x"), py::arg("frequency"), py::kw_only(),
@@ -659,7 +649,7 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
         Examples
         --------
         >>> import numpy as np, fastgoertzel
-        >>> t = np.arange(4096)
+        >>> t = np.arange(4410)  # 44 whole cycles of 440 Hz at 44.1 kHz
         >>> x = np.cos(2 * np.pi * 440 / 44100 * t + 0.25)
         >>> amp, phase = fastgoertzel.goertzel(x, 440, fs=44100)
         >>> round(amp, 3), round(phase, 3)

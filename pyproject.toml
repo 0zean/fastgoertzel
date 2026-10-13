@@ -41,6 +41,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/0zean/fastgoertzel"
+Documentation = "https://0zean.github.io/fastgoertzel/"
 Repository = "https://github.com/0zean/fastgoertzel"
 Issues = "https://github.com/0zean/fastgoertzel/issues"
 Changelog = "https://github.com/0zean/fastgoertzel/blob/master/CHANGELOG.md"
@@ -60,6 +61,11 @@ dev = [
     "pytest-benchmark>=5.1.0",
     "ruff>=0.14.1",
     "scikit-build-core>=0.10",
+]
+docs = [
+    "furo>=2024.8.6",
+    "myst-parser>=4.0",
+    "sphinx>=8.1",
 ]
 
 # ---------------------------------------------------------------------------
@@ -83,7 +89,7 @@ sdist.exclude = [
     "test.py",
     "CppProperties.json",
     "*.json",
-    "docs/_static/**",
+    "docs/**",
 ]
 
 # Local overrides without editing this file:
@@ -124,12 +130,9 @@ test-command = "pytest {project}/tests -q -p no:cacheprovider --ignore={project}
 before-build = "pip install delvewheel"
 repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 
-[tool.cibuildwheel.macos]
-# Both architectures are built on the arm64 runner; x86_64 wheels are tested under Rosetta
-# when available and skipped otherwise. Apple Clang has no OpenMP, so macOS wheels are
-# single-threaded (see README).
-archs = ["x86_64", "arm64"]
-test-skip = "*-macosx_x86_64"
+# macOS: each architecture is built and tested natively, arm64 on macos-latest and x86_64 on
+# macos-15-intel (see publish.yml), so no cross-built wheel ships untested. Apple Clang has
+# no OpenMP, so macOS wheels are single-threaded (see README).
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64", "i686"]

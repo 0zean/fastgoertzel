@@ -3,10 +3,12 @@
 
 <!-- start here -->
 
-fastgoertzel ![GitHub Actions](https://github.com/0zean/fastgoertzel/actions/workflows/ci.yml/badge.svg)
+fastgoertzel ![GitHub Actions](https://github.com/0zean/fastgoertzel/actions/workflows/ci.yml/badge.svg) [![PyPI](https://img.shields.io/pypi/v/fastgoertzel.svg)](https://pypi.org/project/fastgoertzel/) [![Docs](https://img.shields.io/badge/docs-0zean.github.io-blue.svg)](https://0zean.github.io/fastgoertzel/)
 ============
 
 The Goertzel algorithm in C++ with Python bindings: evaluate the spectrum of a real signal at the frequencies you care about, exactly, without computing a full FFT. One frequency, many frequencies, sliding windows, or a streaming filter fed sample by sample.
+
+Documentation, with a usage guide, the API reference, and the migration guide from 1.x: <https://0zean.github.io/fastgoertzel/>.
 
 ## API
 
@@ -30,7 +32,7 @@ Conventions, the same for every call:
 - **Threads.** `goertzel_batch` and `goertzel_sliding_batch` use OpenMP when the build has it (Linux and Windows wheels; macOS wheels are single-threaded) and the work is at least 65,536 sample-frequency products. `threads=` overrides `OMP_NUM_THREADS` per call; `threads=1` forces serial execution, which gives the most predictable latency. The GIL is released in every call.
 - **Accuracy.** Rounding error of the recurrence grows roughly linearly with the signal length and is largest near DC and Nyquist. Measured against a direct DTFT sum: about 2e-10 relative at N = 1e6 for interior frequencies, about 2e-5 for the first bin. Use float64 input; float32 is converted but offers no speed advantage.
 
-Upgrading from 1.x: results are unchanged whenever `frequency * len(x)` was an exact integer. 1.x rounded that product *down* to a bin and reported twice the true amplitude at DC and Nyquist; see `CHANGELOG.md` for the migration note.
+Upgrading from 1.x: results are unchanged whenever `frequency * len(x)` was an exact integer. 1.x rounded that product *down* to a bin and reported twice the true amplitude at DC and Nyquist; see the [migration guide](https://0zean.github.io/fastgoertzel/migration.html).
 
 ## Installation
 
@@ -59,7 +61,7 @@ For example `CMAKE_ARGS="-DFASTGOERTZEL_NATIVE=ON" pip install .`.
 
 The C++ core is header-only (`include/fastgoertzel/goertzel.hpp`) and can be used without Python; the CMake target is `fastgoertzel::core`.
 
-For development, `uv sync` creates the environment and builds the extension; `make check` runs lint, format check, type check, and tests, and `uv run pre-commit install` enables the ruff and clang-format hooks. `make kernel-bench` builds the standalone C++ kernel micro-benchmark.
+For development, `uv sync` creates the environment and builds the extension; `make check` runs lint, format check, type check, and tests, and `uv run pre-commit install` enables the ruff and clang-format hooks. `make docs` builds the documentation site and `make kernel-bench` the standalone C++ kernel micro-benchmark. See `CONTRIBUTING.md`.
 
 ## Usage
 

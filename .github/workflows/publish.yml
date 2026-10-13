@@ -32,7 +32,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macos-latest is arm64, macos-15-intel is x86_64: each macOS wheel is built and
+        # tested on its own architecture.
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
 

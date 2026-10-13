@@ -17,8 +17,8 @@ warnings as errors the way CI does.
 
 Other targets: `make cpp-test` (doctest suite for the header-only core), `make tidy`
 (clang-tidy, needs it on PATH), `make bench` / `make latency` (benchmarks),
-`make readme-tables` (re-render the README tables from `bench.json`), `make kernel-bench`
-(standalone C++ kernel micro-benchmark).
+`make readme-tables` (re-render the README tables from `bench.json`), `make docs`
+(documentation site), `make kernel-bench` (standalone C++ kernel micro-benchmark).
 
 ## Layout
 
@@ -42,6 +42,16 @@ Rules that the tests enforce and that pull requests must keep:
   instruction-set builds cannot be merged by the linker.
 - Every public function has a stub in `_core.pyi`; `stubtest` runs in CI.
 
+## Documentation
+
+The site under `docs/` is Sphinx with Markdown sources (MyST) and is published to GitHub
+Pages by `.github/workflows/docs.yml` on every push to `master`; CI builds it with
+warnings as errors on every branch. The API page is generated from the docstrings in
+`cpp/bindings.cpp`, with the signatures taken from `src/fastgoertzel/_core.pyi`, so a new
+or changed parameter is documented by editing those two files. The `>>>` examples in the
+docstrings and the `python` blocks in `README.md` are executed by `tests/test_docs.py`.
+The changelog and this file are included in the site as they are.
+
 ## Benchmarks and performance claims
 
 Run `make bench`, which writes `bench.json`, and `make readme-tables` to refresh the README
@@ -52,6 +62,8 @@ regressions with ratio checks that are machine independent.
 ## Release checklist
 
 1. Update `CHANGELOG.md`: move the unreleased notes under the new version and date.
+   Re-render the README performance tables from a fresh run (`make bench`,
+   `make readme-tables`) if the kernels changed.
 2. Bump the version in `pyproject.toml` with bumpver, which also tags:
    `uv run bumpver update --tag final` (dev → release) or `--patch` / `--minor` / `--major`.
 3. Push the branch, open a pull request, wait for CI (matrix, sanitizers, C++ tests,
@@ -61,3 +73,4 @@ regressions with ratio checks that are machine independent.
    pre-AVX CPU, then uploads with PyPI trusted publishing. Pushing the tag yourself, rather
    than creating a GitHub Release first, avoids triggering the workflow twice.
 5. Create the GitHub Release from the existing tag with the CHANGELOG section as notes.
+   The documentation site is rebuilt and deployed by the merge to `master`.
