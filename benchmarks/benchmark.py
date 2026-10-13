@@ -162,6 +162,7 @@ def environment(threads: str) -> dict[str, Any]:
         "cpu_flags": flags,
         "logical_cores": os.cpu_count(),
         "omp_num_threads": threads,
+        "kernel": getattr(fastgoertzel._core, "_kernel", "unknown"),
     }
 
 

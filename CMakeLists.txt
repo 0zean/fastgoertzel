@@ -11,6 +11,7 @@ option(FASTGOERTZEL_NATIVE "Tune for the build machine (-march=native). Never fo
 option(FASTGOERTZEL_WERROR "Treat compiler warnings as errors (CI)" OFF)
 option(FASTGOERTZEL_BUILD_PYTHON "Build the Python extension module" ON)
 option(FASTGOERTZEL_BUILD_BENCHMARKS "Build the standalone C++ kernel benchmark" OFF)
+option(FASTGOERTZEL_BUILD_TESTS "Build the C++ unit tests for the header-only core (doctest)" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -125,6 +126,25 @@ endif()
 if(FASTGOERTZEL_BUILD_BENCHMARKS)
   add_executable(kernel_bench benchmarks/cpp/kernel_bench.cpp)
   target_link_libraries(kernel_bench PRIVATE fastgoertzel::core fastgoertzel_flags)
+endif()
+
+# ---------------------------------------------------------------------------
+# C++ unit tests for the header-only core (doctest, fetched at configure time).
+#   cmake -S . -B build/cpp -DFASTGOERTZEL_BUILD_PYTHON=OFF -DFASTGOERTZEL_BUILD_TESTS=ON
+#   cmake --build build/cpp && ctest --test-dir build/cpp --output-on-failure
+# ---------------------------------------------------------------------------
+if(FASTGOERTZEL_BUILD_TESTS)
+  include(FetchContent)
+  FetchContent_Declare(
+    doctest
+    GIT_REPOSITORY https://github.com/doctest/doctest.git
+    GIT_TAG v2.4.11
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(doctest)
+  enable_testing()
+  add_executable(core_tests tests/cpp/test_core.cpp)
+  target_link_libraries(core_tests PRIVATE fastgoertzel::core fastgoertzel_flags doctest::doctest)
+  add_test(NAME core_tests COMMAND core_tests)
 endif()
 
 message(STATUS "fastgoertzel ${FASTGOERTZEL_VERSION}: OpenMP=${FASTGOERTZEL_HAVE_OPENMP} "

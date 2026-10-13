@@ -86,6 +86,21 @@ def goertzel_sliding_batch(
     """
     ...
 
+def goertzel_sliding_batch_complex(
+    x: ArrayLike,
+    window_size: int,
+    frequencies: ArrayLike,
+    *,
+    step: int = 1,
+    fs: float | None = None,
+    threads: int | None = None,
+) -> NDArray[np.complex128]:
+    """``goertzel_sliding_batch`` returning the complex DTFT of each window.
+
+    Shape ``((len(x) - window_size) // step + 1, len(frequencies))``; no ``sqrt``/``atan2``.
+    """
+    ...
+
 class GoertzelFilter:
     """Stateful Goertzel filter for streaming input.
 

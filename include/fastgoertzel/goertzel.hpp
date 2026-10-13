@@ -158,37 +158,78 @@ inline double amplitude_scale(std::size_t n, bool dc_or_nyquist) noexcept {
 }
 
 /// Stateful Goertzel filter: feed samples as they arrive, read X at any time.
-/// Not safe for concurrent push() on the same instance.
+///
+/// Internally the total is X_acc + e^{-jw*start} * X(open chain): samples arrive either
+/// through the recurrence (push) or as a pre-computed chunk DTFT (absorb, used by the
+/// Python layer to run large chunks through the block-parallel kernel). The shift theorem
+/// makes the two interchangeable: a chunk beginning at sample index s contributes
+/// e^{-j 2 pi f s} times its own window-relative DTFT.
+///
+/// Not safe for concurrent use of the same instance from several threads.
 class StreamingGoertzel {
 public:
     explicit StreamingGoertzel(double cycles_per_sample) noexcept
         : f_(cycles_per_sample), c_(coefficients(omega_from_frequency(cycles_per_sample))) {}
 
+    /// Appends n samples through the recurrence.
     void push(const double* x, std::size_t n) noexcept {
         s_ = recurrence(x, n, c_.coeff, s_);
-        n_ += n;
+        chain_n_ += n;
     }
     void push(double x) noexcept { push(&x, 1); }
 
-    /// X at the filter frequency over every sample pushed so far (0 when nothing was pushed).
+    /// Appends n samples whose window-relative DTFT `chunk` was computed elsewhere.
+    void absorb(Complex chunk, std::size_t n) noexcept {
+        flush_chain();
+        add_shifted(chunk);
+        done_ += n;
+    }
+
+    /// X over every sample pushed or absorbed so far (0 when nothing was fed).
     Complex result() const noexcept {
-        return n_ == 0 ? Complex{0.0, 0.0} : finish_general(s_, n_, c_, f_);
+        Complex X = acc_;
+        if (chain_n_ != 0) {
+            const Complex tail =
+                rotate_by_cycles(finish_general(s_, chain_n_, c_, f_),
+                                 fractional_cycles(f_, static_cast<double>(done_)));
+            X.re += tail.re;
+            X.im += tail.im;
+        }
+        return X;
     }
 
     void reset() noexcept {
         s_ = State{};
-        n_ = 0;
+        chain_n_ = 0;
+        done_ = 0;
+        acc_ = Complex{0.0, 0.0};
     }
 
-    std::size_t count() const noexcept { return n_; }
+    std::size_t count() const noexcept { return done_ + chain_n_; }
     double frequency() const noexcept { return f_; }
     const Coefficients& coeffs() const noexcept { return c_; }
 
 private:
+    void add_shifted(Complex chunk) noexcept {
+        const Complex r =
+            rotate_by_cycles(chunk, fractional_cycles(f_, static_cast<double>(done_)));
+        acc_.re += r.re;
+        acc_.im += r.im;
+    }
+    void flush_chain() noexcept {
+        if (chain_n_ == 0) return;
+        add_shifted(finish_general(s_, chain_n_, c_, f_));
+        done_ += chain_n_;
+        chain_n_ = 0;
+        s_ = State{};
+    }
+
     double f_;
     Coefficients c_;
-    State s_{};
-    std::size_t n_ = 0;
+    State s_{};                // open recurrence chain, starting at sample index done_
+    std::size_t chain_n_ = 0;  // samples in the open chain
+    std::size_t done_ = 0;     // samples already folded into acc_
+    Complex acc_{0.0, 0.0};
 };
 
 }  // namespace fastgoertzel

@@ -1,0 +1,22 @@
+# Static analysis for the C++ sources. Run locally with `make tidy` (needs clang-tidy on PATH)
+# or let the CI job do it. Only our own headers are analysed (HeaderFilterRegex); pybind11 and
+# the standard library are excluded.
+Checks: >
+  bugprone-*,
+  performance-*,
+  clang-analyzer-*,
+  portability-*,
+  modernize-use-nullptr,
+  modernize-use-override,
+  modernize-use-using,
+  readability-misleading-indentation,
+  readability-redundant-smartptr-get,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-exception-escape
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(include/fastgoertzel/|cpp/).*'
+FormatStyle: file
+CheckOptions:
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: 'Array;OptDouble;OptInt'

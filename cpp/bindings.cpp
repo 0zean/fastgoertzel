@@ -504,6 +504,43 @@ py::array_t<double> goertzel_sliding_batch(const Array& x, py::ssize_t window_si
     return result;
 }
 
+py::array_t<std::complex<double>> goertzel_sliding_batch_complex(
+    const Array& x, py::ssize_t window_size, const Array& frequencies, py::ssize_t step,
+    const OptDouble& fs, const OptInt& threads) {
+    require_1d(x, "x");
+    const auto total = static_cast<std::size_t>(x.shape(0));
+    require_nonempty(total, "x");
+    if (window_size < 1 || static_cast<std::size_t>(window_size) > total) {
+        throw py::value_error("window_size must be in [1, len(x)] (got " +
+                              std::to_string(window_size) +
+                              " for len(x) = " + std::to_string(total) + ")");
+    }
+    if (step < 1) {
+        throw py::value_error("step must be a positive integer (got " + std::to_string(step) + ")");
+    }
+    require_fs(fs);
+    const int nthreads = resolve_threads(threads);
+    const std::vector<double> freqs = resolve_frequencies(frequencies, fs);
+    const std::vector<fgz::Coefficients> coeffs = coefficients_for(freqs);
+    const std::size_t m = freqs.size();
+    const auto w = static_cast<std::size_t>(window_size);
+    const auto st = static_cast<std::size_t>(step);
+    const SlidingSpec sp{total, w, st, (total - w) / st + 1};
+
+    py::array_t<std::complex<double>> result({checked_ssize(sp.n_windows), checked_ssize(m)});
+    auto out = result.mutable_unchecked<2>();
+    const double* data = x.data();
+    {
+        py::gil_scoped_release release;
+        sliding_many(data, sp, coeffs, freqs, nthreads,
+                     [&](std::size_t wi, std::size_t fi, fgz::Complex Y) noexcept {
+                         out(checked_ssize(wi), checked_ssize(fi)) =
+                             std::complex<double>(Y.re, Y.im);
+                     });
+    }
+    return result;
+}
+
 // ---- streaming filter -------------------------------------------------------------
 
 struct PyFilter {
@@ -524,7 +561,16 @@ struct PyFilter {
         const auto n = static_cast<std::size_t>(x.size());
         const double* data = x.data();
         py::gil_scoped_release release;
-        core.push(data, n);
+        // Large chunks go through the block-parallel lane kernel and are folded in with
+        // the shift theorem; small ones extend the open recurrence chain (no trig per push).
+        constexpr std::size_t kBlockedPushMin = 4096;
+        if (n >= kBlockedPushMin) {
+            const fgz::Complex chunk =
+                dtft_one(fgk::active_api(), data, n, core.coeffs(), FreqTwiddle{core.frequency()});
+            core.absorb(chunk, n);
+        } else {
+            core.push(data, n);
+        }
     }
 
     fgz::Complex result_or_throw() const {
@@ -715,6 +761,18 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
         accumulate. Otherwise each window is computed from scratch. Work is distributed
         over OpenMP threads by (frequency, 256-window chunk); results do not depend on the
         thread count. The GIL is released.
+        )pbdoc");
+
+    m.def("goertzel_sliding_batch_complex", &goertzel_sliding_batch_complex, py::arg("x"),
+          py::arg("window_size"), py::arg("frequencies"), py::kw_only(), py::arg("step") = 1,
+          py::arg("fs") = py::none(), py::arg("threads") = py::none(),
+          R"pbdoc(
+        :func:`goertzel_sliding_batch` returning the unscaled complex DTFT of every window.
+
+        Same arguments as :func:`goertzel_sliding_batch` without ``scale``. Returns a
+        complex128 array of shape ``(n_windows, len(frequencies))``. Skips the ``sqrt`` and
+        ``atan2`` per window, which dominate the cost of the (value, phase) form once the
+        sliding update has made the window length irrelevant.
         )pbdoc");
 
     py::class_<PyFilter>(m, "GoertzelFilter",

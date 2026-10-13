@@ -85,3 +85,33 @@ def test_many_independent_filters_are_cheap_and_isolated():
         flt.push(x)
     got = np.array([flt.result_complex() for flt in filters])
     np.testing.assert_allclose(got, fg.goertzel_batch_complex(x, freqs), rtol=1e-11)
+
+
+@pytest.mark.parametrize("chunks", [1, 3, 10])
+def test_large_chunks_take_the_blocked_path_and_match(chunks):
+    """Chunks of 4096 samples or more are folded in via the shift theorem; must equal one-shot."""
+    rng = np.random.default_rng(300 + chunks)
+    x = rng.standard_normal(100_000)
+    f = 0.2718
+    flt = fg.GoertzelFilter(f)
+    for part in np.array_split(x, chunks):
+        flt.push(part)
+    assert flt.n_samples == 100_000
+    assert flt.result_complex() == pytest.approx(fg.goertzel_complex(x, f), rel=1e-9)
+
+
+def test_mixed_small_and_large_pushes_match_one_shot():
+    rng = np.random.default_rng(301)
+    x = rng.standard_normal(30_000)
+    f = 0.05
+    flt = fg.GoertzelFilter(f)
+    cuts = [0, 1, 2, 5_000, 5_001, 9_100, 9_101, 20_000, 29_999, 30_000]
+    for a, b in zip(cuts[:-1], cuts[1:]):
+        if b - a == 1:
+            flt.push(float(x[a]))
+        else:
+            flt.push(x[a:b])
+        # Intermediate results are valid at every point, whichever path was taken.
+        assert flt.result_complex() == pytest.approx(fg.goertzel_complex(x[:b], f), rel=1e-9)
+    assert flt.n_samples == 30_000
+    assert flt.result() == pytest.approx(fg.goertzel(x, f), rel=1e-9)

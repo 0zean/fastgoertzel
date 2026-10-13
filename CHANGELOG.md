@@ -7,7 +7,26 @@ All notable changes to this project are documented here. The format follows
 ## [2.0.0.dev0] - Unreleased
 
 Work in progress on the 2.0 line. Phases 1 (build system and layout), 2 (algorithm and
-API) and 3 (kernel speed-ups) are complete.
+API), 3 (kernel speed-ups) and 4 (quality and hardening) are complete.
+
+### Added (Phase 4)
+- `goertzel_sliding_batch_complex()`: sliding windows with complex output, skipping the
+  per-window `sqrt`/`atan2` that dominates the (value, phase) form.
+- `GoertzelFilter.push()` runs chunks of 4,096 samples or more through the block-parallel
+  kernel and folds them in with the shift theorem; small pushes still extend the open
+  recurrence chain with no per-push trigonometry. Results are unchanged.
+- Property-based tests (Hypothesis) against the direct DTFT definition for random
+  lengths, frequencies, chunkings and window/step combinations.
+- Performance regression guard (`tests/test_performance.py`): machine-independent ratio
+  checks against NumPy and between fastgoertzel paths, plus a check that the AVX2 kernel
+  is selected when the CPU supports it.
+- C++ unit tests for the header-only core (doctest via CMake, `-DFASTGOERTZEL_BUILD_TESTS=ON`,
+  `make cpp-test`), run in CI on Linux, macOS and Windows.
+- `.clang-tidy` configuration and a CI job running it over the C++ translation units.
+- `benchmarks/render_tables.py`: renders the README performance tables from a benchmark
+  JSON report (`make readme-tables`); the README tables now come from one recorded run.
+- `CONTRIBUTING.md` with the layout, the invariants the tests enforce, and the release
+  checklist. Python 3.14 added to CI and to the wheel matrix.
 
 ### Performance (Phase 3)
 Measured on the reference machine (i9-14900KF, MSVC, AVX2+FMA kernel); see README.

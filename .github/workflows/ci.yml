@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -109,6 +109,49 @@ jobs:
           python -c "import fastgoertzel as fg; fg.goertzel([1.0, 2.0], 1.5)" 2>&1 | tail -n 3 || true
           echo "--- test suite ---"
           pytest -x -q -p no:cacheprovider --capture=no
+
+  cpp-tests:
+    name: C++ core tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (header-only core + doctest, no Python)
+        run: >
+          cmake -S . -B build/cpp
+          -DFASTGOERTZEL_BUILD_PYTHON=OFF
+          -DFASTGOERTZEL_BUILD_TESTS=ON
+          -DFASTGOERTZEL_BUILD_BENCHMARKS=ON
+          -DFASTGOERTZEL_WERROR=ON
+          -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build/cpp --config Release
+      - name: Test
+        run: ctest --test-dir build/cpp --build-config Release --output-on-failure
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install clang-tidy and pybind11
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq clang-tidy
+          pip install "pybind11>=2.12"
+      - name: Configure with a compile database
+        run: >
+          cmake -S . -B build/tidy
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DCMAKE_BUILD_TYPE=Release
+          -Dpybind11_DIR="$(python -m pybind11 --cmakedir)"
+      - name: Analyse our translation units (configuration in .clang-tidy)
+        run: run-clang-tidy -p build/tidy -quiet 'cpp/.*\.cpp$'
 
   wheel-smoke:
     name: cibuildwheel smoke (${{ matrix.os }})

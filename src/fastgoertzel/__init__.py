@@ -19,6 +19,8 @@ goertzel_batch_complex(x, frequencies, *, fs=None, threads=None)
     Complex variant of ``goertzel_batch``.
 goertzel_sliding_batch(x, window_size, frequencies, *, step=1, fs=None, scale=..., threads=None)
     Every (strided) sliding window of ``x`` at several frequencies.
+goertzel_sliding_batch_complex(x, window_size, frequencies, *, step=1, fs=None, threads=None)
+    Complex variant of ``goertzel_sliding_batch`` (no ``sqrt``/``atan2`` per window).
 
 Classes
 -------
@@ -37,6 +39,7 @@ from ._core import (
     goertzel_bin,
     goertzel_complex,
     goertzel_sliding_batch,
+    goertzel_sliding_batch_complex,
 )
 
 __all__ = [
@@ -48,4 +51,5 @@ __all__ = [
     "goertzel_bin",
     "goertzel_complex",
     "goertzel_sliding_batch",
+    "goertzel_sliding_batch_complex",
 ]

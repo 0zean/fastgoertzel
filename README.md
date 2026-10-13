@@ -18,6 +18,7 @@ The Goertzel algorithm in C++ with Python bindings: evaluate the spectrum of a r
 | `goertzel_batch(x, frequencies, *, fs=None, scale=..., threads=None)` | array `(M, 2)` of `(value, phase)` |
 | `goertzel_batch_complex(x, frequencies, *, fs=None, threads=None)` | complex array `(M,)` |
 | `goertzel_sliding_batch(x, window_size, frequencies, *, step=1, fs=None, scale=..., threads=None)` | array `(n_windows, M, 2)` |
+| `goertzel_sliding_batch_complex(x, window_size, frequencies, *, step=1, fs=None, threads=None)` | complex array `(n_windows, M)` |
 | `GoertzelFilter(frequency, *, fs=None)` | object with `push(x)`, `result(scale=...)`, `result_complex()`, `reset()`, `n_samples` |
 
 Conventions, the same for every call:
@@ -99,47 +100,68 @@ When to use it instead of an FFT: the Goertzel algorithm costs about `2 * N` flo
 
 ## Performance
 
-Measured with `python benchmarks/benchmark.py` on an Intel Core i9-14900KF (8P + 16E cores, 32 threads), Windows 11, Python 3.11.9, NumPy 2.3.4, MSVC 19.44 build of fastgoertzel 2.0.0.dev0 with the AVX2+FMA kernel selected. Each time is the minimum of 7 rounds. Numbers on other machines will differ; re-run the script and quote your own, together with the baseline and thread count.
+The tables below are generated from `benchmarks/benchmark.py --json` by `benchmarks/render_tables.py` (`make bench` then `make readme-tables`), so they always describe one real run on one named machine. Numbers on other machines will differ; re-run the script and quote your own together with the baseline and thread count. How to read them:
 
-**One frequency**, `goertzel(x, f)`, single-threaded by design:
+- **One frequency** is single-threaded by design. The Goertzel recurrence is a dependency chain that costs a few cycles per sample however the loop is written; signals of 4,096 samples or more are therefore split into up to eight independent blocks whose results are combined exactly, which keeps the FMA units busy. The hot loops are compiled for baseline x86-64 and for AVX2+FMA and the build is chosen at import, so the wheel still runs on any CPU (`FASTGOERTZEL_KERNEL=baseline` forces the portable build; `fastgoertzel._core._kernel` reports the choice).
+- **Several frequencies.** On one thread a batch costs the same per frequency as a single call: both run eight chains and are compute-bound once the signal is in cache. What the batch adds is OpenMP over lane groups, and one pass over the data per eight frequencies when the signal is larger than cache. Against `np.fft.rfft`, which computes every bin at once, the single-threaded crossover is between 8 and 32 frequencies at N = 1e6; Goertzel is the tool for few frequencies, arbitrary (non-bin) frequencies, streaming, and sliding windows.
+- **Sliding windows** use the sliding-DFT update (constant cost per hop, re-synchronised exactly every 256 windows), so the window length no longer matters. Version 1.0.x recomputed every window and took 362 ms single-threaded on the N = 100,000, W = 256, M = 8 row; what remains per window in the (value, phase) form is mostly `sqrt` and `atan2`, which `goertzel_sliding_batch_complex` skips.
+- **Per-call latency** is what a real-time loop cares about; Python call overhead is included. Calls that enter an OpenMP region carry a heavier tail: pass `threads=1` or keep the work below the 65,536 sample-frequency threshold for predictable latency on small inputs.
+
+<!-- benchmark-tables:start -->
+Measured with `python benchmarks/benchmark.py` on Intel(R) Core(TM) i9-14900KF (32 logical cores), Windows-10-10.0.26300-SP0, Python 3.11.9, NumPy 2.3.4, fastgoertzel 2.0.0.dev0, avx2 kernel. Each time is the minimum of the timing rounds; ratios are baseline time over fastgoertzel time.
+
+**One frequency**, `goertzel(x, f)`, single-threaded:
 
 | N | fastgoertzel | pure-Python loop | NumPy 2x real dot | `np.fft.rfft`, one bin |
 |---:|---:|---:|---:|---:|
-| 1,000 | 1.7 us | 24 us (14x) | 10 us (5.8x) | 7.5 us (4.3x) |
-| 100,000 | 40 us | 2.3 ms (59x) | 0.94 ms (24x) | 0.45 ms (11x) |
-| 1,000,000 | 0.39 ms | 25 ms (64x) | 10.4 ms (27x) | 8.5 ms (22x) |
-| 10,000,000 | 4.2 ms | not run | 113 ms (27x) | 127 ms (31x) |
+| 100 | 0.6 us | 2.9 us (5.2x) | 3.1 us (5.5x) | 4.0 us (7.2x) |
+| 1,000 | 1.7 us | 22.7 us (13.6x) | 10.0 us (6.0x) | 7.0 us (4.2x) |
+| 10,000 | 4.3 us | 230.5 us (53.1x) | 76.5 us (17.6x) | 41.0 us (9.4x) |
+| 100,000 | 38.4 us | 2.40 ms (62.5x) | 932.6 us (24.3x) | 451.8 us (11.8x) |
+| 1,000,000 | 388.4 us | 24.45 ms (62.9x) | 10.55 ms (27.2x) | 8.53 ms (21.9x) |
+| 10,000,000 | 4.32 ms | not run | 119.00 ms (27.5x) | 152.66 ms (35.3x) |
 
-That is about 2.5 billion samples per second on one core. The Goertzel recurrence is a dependency chain that costs a few cycles per sample however the loop is written; signals of 4,096 samples or more are therefore split into up to eight independent blocks whose results are combined exactly, which keeps the FMA units busy. The hot loops are compiled twice, for baseline x86-64 and for AVX2+FMA, and the build is chosen at import time, so the wheel still runs on any CPU. `FASTGOERTZEL_KERNEL=baseline` forces the portable build; `fastgoertzel._core._kernel` reports which one is active.
+**Several frequencies**, `goertzel_batch(x, freqs)` (OpenMP default threads):
 
-**Several frequencies**, `goertzel_batch`: up to eight frequencies share one pass over the signal, so the cost per frequency falls well below a single call, and OpenMP distributes lane groups over cores.
-
-| N | M | fastgoertzel, 32 threads | fastgoertzel, 1 thread | `np.fft.rfft` (all bins) |
-|---:|---:|---:|---:|---:|
-| 1,000,000 | 8 | 0.27 ms | 1.6 ms | 8.4 ms (31x / 5x) |
-| 1,000,000 | 32 | 1.06 ms | 12.6 ms | 8.5 ms (8x / 0.7x) |
-| 1,000,000 | 64 | 1.9 ms | 25 ms | 9.6 ms (5x / 0.4x) |
-
-The last column shows the honest crossover: with one thread, an FFT that computes all bins at once wins somewhere between 8 and 32 frequencies for N = 1e6. Goertzel is the tool for few frequencies, arbitrary (non-bin) frequencies, streaming, and sliding windows.
-
-**Sliding windows**, `goertzel_sliding_batch`: consecutive windows are produced with the sliding-DFT update (constant cost per hop, re-synchronised exactly every 256 windows), so the window length no longer matters.
-
-| N | W | M | fastgoertzel, 32 threads | fastgoertzel, 1 thread | NumPy `sliding_window_view` + `rfft` |
+| N | M | fastgoertzel | M x `goertzel` | `np.fft.rfft` (all bins) | M x NumPy dot |
 |---:|---:|---:|---:|---:|---:|
-| 100,000 | 256 | 8 | 2.5 ms | 11.8 ms | 87 ms (35x / 7x) |
-| 100,000 | 1024 | 8 | 2.4 ms | about 12 ms | 321 ms (133x / 27x) |
+| 1,000 | 8 | 4.2 us | 14.0 us (3.4x) | 6.1 us (1.5x) | 91.3 us (22.0x) |
+| 100,000 | 8 | 36.0 us | 308.0 us (8.6x) | 432.2 us (12.0x) | 7.39 ms (205.6x) |
+| 1,000,000 | 8 | 243.7 us | 3.05 ms (12.5x) | 8.25 ms (33.9x) | 84.68 ms (347.5x) |
+| 1,000,000 | 64 | 1.67 ms | 24.51 ms (14.7x) | 9.89 ms (5.9x) | 631.05 ms (378.1x) |
+| 10,000,000 | 8 | 2.55 ms | 32.66 ms (12.8x) | 146.18 ms (57.3x) | 993.77 ms (389.3x) |
 
-Version 1.0.x recomputed every window from scratch and took 362 ms single-threaded on the first row. What remains per window is mostly the `sqrt` and `atan2` of the (value, phase) output.
+**Sliding windows**, `goertzel_sliding_batch(x, W, freqs)` (OpenMP default threads):
 
-**Per-call latency** matters more than throughput in a real-time loop. The same script reports percentiles over 100,000 individual calls (`--latency-only`), Python call overhead included:
+| N | W | M | fastgoertzel | NumPy `sliding_window_view` + `rfft` |
+|---:|---:|---:|---:|---:|
+| 10,000 | 256 | 8 | 87.1 us | 7.98 ms (91.6x) |
+| 10,000 | 256 | 64 | 2.79 ms | 18.99 ms (6.8x) |
+| 100,000 | 256 | 8 | 2.28 ms | 88.76 ms (39.0x) |
+| 100,000 | 1024 | 8 | 2.26 ms | 312.32 ms (137.9x) |
 
-| Call | p50 | p99 | p99.9 |
-|---|---:|---:|---:|
-| `goertzel`, 64 samples | 0.6 us | 1.2 us | 8.5 us |
-| `goertzel`, 1,024 samples | 1.0 us | 1.9 us | 23 us |
-| `goertzel`, 4,096 samples | 2.2 us | 3.7 us | 52 us |
-| `goertzel_batch`, 256 samples, 8 frequencies (serial) | 2.1 us | 3.5 us | 34 us |
-| `goertzel_batch`, 65,536 samples, 8 frequencies (OpenMP) | 30 us | 99 us | 300 us |
-| `np.fft.rfft`, 256 samples (reference) | 3.5 us | 8.3 us | 61 us |
+**OpenMP scaling**, batch N = 1e6, M = 32 and sliding N = 1e5, W = 256, M = 8:
 
-Calls that enter an OpenMP region carry a heavier tail. For predictable latency on small inputs pass `threads=1` or keep the work below the 65,536 sample-frequency threshold at which the parallel region is entered.
+| OMP_NUM_THREADS | batch | sliding |
+|---:|---:|---:|
+| 1 | 12.02 ms | 11.42 ms |
+| 2 | 6.08 ms | 7.39 ms |
+| 4 | 3.14 ms | 5.28 ms |
+| 8 | 1.72 ms | 3.79 ms |
+| 16 | 1.25 ms | 2.53 ms |
+| default | 937.6 us | 2.38 ms |
+
+**Per-call latency**, 100,000 calls each, Python overhead included:
+
+| Call | p50 | p90 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|
+| goertzel        N=64 | 0.5 us | 0.6 us | 1.1 us | 2.4 us | 114 us |
+| goertzel        N=256 | 0.8 us | 0.8 us | 1.4 us | 3.9 us | 385 us |
+| goertzel        N=1024 | 0.9 us | 1.0 us | 1.6 us | 5.1 us | 733 us |
+| goertzel        N=4096 | 2.2 us | 2.2 us | 3.4 us | 17.3 us | 464 us |
+| batch           N=256    M=8 (serial) | 2.0 us | 2.2 us | 3.3 us | 12.8 us | 200 us |
+| batch           N=65536  M=8 (OpenMP) | 24.7 us | 31.9 us | 73.6 us | 305.3 us | 363 us |
+| sliding         N=1024 W=256 M=4 | 35.9 us | 37.3 us | 73.7 us | 146.9 us | 752 us |
+| np.fft.rfft     N=256 (reference) | 3.5 us | 3.9 us | 5.6 us | 36.7 us | 324 us |
+| NumPy 2x dot    N=256 (reference) | 4.8 us | 5.1 us | 7.4 us | 44.1 us | 388 us |
+<!-- benchmark-tables:end -->

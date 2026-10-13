@@ -41,6 +41,21 @@ bench:
 latency:
 	uv run python benchmarks/benchmark.py --latency-only
 
+# C++ unit tests for the header-only core (doctest is fetched by CMake).
+cpp-test:
+	cmake -S . -B build/cpp -DFASTGOERTZEL_BUILD_PYTHON=OFF -DFASTGOERTZEL_BUILD_TESTS=ON -DFASTGOERTZEL_WERROR=ON -DCMAKE_BUILD_TYPE=Release
+	cmake --build build/cpp --config Release
+	ctest --test-dir build/cpp --build-config Release --output-on-failure
+
+# Static analysis of the C++ sources (needs clang-tidy and run-clang-tidy on PATH).
+tidy:
+	cmake -S . -B build/tidy -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_BUILD_TYPE=Release -Dpybind11_DIR="$$(uv run python -m pybind11 --cmakedir)"
+	run-clang-tidy -p build/tidy -quiet 'cpp/.*\.cpp$$'
+
+# Re-render the README benchmark tables from a JSON report produced by `make bench`.
+readme-tables:
+	uv run python benchmarks/render_tables.py bench.json --update README.md
+
 # Standalone C++ kernel micro-benchmark (no Python involved).
 kernel-bench:
 	cmake -S . -B build/bench -DFASTGOERTZEL_BUILD_PYTHON=OFF -DFASTGOERTZEL_BUILD_BENCHMARKS=ON -DCMAKE_BUILD_TYPE=Release
