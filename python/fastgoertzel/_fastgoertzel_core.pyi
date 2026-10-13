@@ -1,87 +1,35 @@
-from typing import Tuple
-
+# SPDX-License-Identifier: GPL-3.0-or-later
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
-def goertzel(x: NDArray[np.float64], frequency: float) -> Tuple[float, float]:
-    """
-    Compute amplitude and phase using the Goertzel algorithm.
+__version__: str
+_has_openmp: bool
 
-    Parameters
-    ----------
-    x : numpy.ndarray
-        1-dimensional array of input samples
-    frequency : float
-        Normalized frequency to detect (0 to 1, where 1 = sampling rate)
+def goertzel(x: ArrayLike, frequency: float) -> tuple[float, float]:
+    """Amplitude and phase of DFT bin ``floor(frequency * len(x))`` of ``x``.
 
-    Returns
-    -------
-    tuple[float, float]
-        (amplitude, phase) where phase is in radians
-
-    Examples
-    --------
-    >>> import numpy as np
-    >>> import fastgoertzel
-    >>>
-    >>> # Generate test signal
-    >>> t = np.arange(0, 512)
-    >>> freq = 1/128  # Normalized frequency
-    >>> signal = np.sin(2 * np.pi * freq * t)
-    >>>
-    >>> # Detect frequency
-    >>> amp, phase = fastgoertzel.goertzel(signal, freq)
-    >>> print(f"Amplitude: {amp:.4f}, Phase: {phase:.4f}")
-
-    Notes
-    -----
-    The Goertzel algorithm is particularly efficient when detecting
-    a small number of frequencies compared to computing a full FFT.
+    ``x`` is converted to a contiguous 1-D float64 array. ``frequency`` must be in
+    ``[0, 1)``. Phase is cosine-referenced; amplitude is ``2|X|/N``.
+    Raises ``ValueError`` for an empty or non-1-D ``x`` or an out-of-range frequency.
     """
     ...
 
-def goertzel_batch(
-    x: NDArray[np.float64], frequencies: NDArray[np.float64]
-) -> NDArray[np.float64]:
-    """
-    Process multiple frequencies in a single call.
+def goertzel_batch(x: ArrayLike, frequencies: ArrayLike) -> NDArray[np.float64]:
+    """Same as ``goertzel`` for every entry of ``frequencies``.
 
-    Parameters
-    ----------
-    x : numpy.ndarray
-        1-dimensional array of input samples
-    frequencies : numpy.ndarray
-        1-dimensional array of normalized frequencies
-
-    Returns
-    -------
-    numpy.ndarray
-        2D array of shape (n_frequencies, 2) with amplitudes and phases
+    Returns an array of shape ``(len(frequencies), 2)`` with amplitude in column 0 and
+    phase in column 1. Raises ``ValueError`` on invalid input.
     """
     ...
 
 def goertzel_sliding_batch(
-    x: NDArray[np.float64],
+    x: ArrayLike,
     window_size: int,
-    frequencies: NDArray[np.float64],
+    frequencies: ArrayLike,
 ) -> NDArray[np.float64]:
-    """
-    Process sliding windows of data for multiple frequencies.
+    """``goertzel_batch`` over every window ``x[w : w + window_size]``.
 
-    Parameters
-    ----------
-    x : numpy.ndarray
-        1-dimensional array of input samples
-    window_size : int
-        Size of the sliding window
-    frequencies : numpy.ndarray
-        1-dimensional array of normalized frequencies
-
-    Returns
-    -------
-    numpy.ndarray
-        Array of shape (n_windows, n_frequencies, 2) with amplitudes and phases
+    Returns an array of shape ``(len(x) - window_size + 1, len(frequencies), 2)``.
+    ``window_size`` must be in ``[1, len(x)]``. Raises ``ValueError`` on invalid input.
     """
     ...
-
-__version__: str

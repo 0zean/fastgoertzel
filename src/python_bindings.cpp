@@ -1,256 +1,269 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// pybind11 layer for fastgoertzel.
+//
+// Responsibilities of this file, and only this file:
+//   * argument conversion (any array-like -> contiguous float64),
+//   * validation, raising ValueError *before* the GIL is released and before any
+//     OpenMP region is entered (an exception escaping an OpenMP region terminates
+//     the process),
+//   * releasing the GIL for the numeric work,
+//   * optional OpenMP parallelism for the batch functions.
+// The numeric kernel lives in goertzel.hpp and is noexcept.
+
 #include "goertzel.hpp"
+
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-#include <vector>
-#include <tuple>
-#include <cmath>
 
-#ifdef _OPENMP
+#include <cstddef>
+#include <string>
+#include <vector>
+
+#if defined(_OPENMP)
 #include <omp.h>
 #endif
 
+#define FASTGOERTZEL_STRINGIFY_IMPL(x) #x
+#define FASTGOERTZEL_STRINGIFY(x) FASTGOERTZEL_STRINGIFY_IMPL(x)
+
 namespace py = pybind11;
 
-// Wrapper function for NumPy arrays
-std::tuple<double, double> goertzel_numpy(
-    py::array_t<double, py::array::c_style | py::array::forcecast> x,
-    double frequency
-) {
-    py::buffer_info buf = x.request();
-    if (buf.ndim != 1) {
-        throw std::runtime_error("Input must be a 1-dimensional array");
-    }
-    double* ptr = static_cast<double*>(buf.ptr);
-    size_t length = buf.shape[0];
+namespace {
 
-    py::gil_scoped_release release; // <-- Release GIL during computation
-    return fastgoertzel::GoertzelAlgorithm::compute(ptr, length, frequency);
+using Array = py::array_t<double, py::array::c_style | py::array::forcecast>;
+
+// Below this much work (samples * frequencies) an OpenMP region costs more than it saves.
+constexpr std::size_t kParallelThreshold = std::size_t{1} << 16;
+
+// ---- validation -------------------------------------------------------------------
+
+void require_1d(const Array& a, const char* name) {
+    if (a.ndim() != 1) {
+        throw py::value_error(std::string(name) + " must be a 1-dimensional array, got " +
+                              std::to_string(a.ndim()) + " dimension(s)");
+    }
 }
 
-py::array_t<double> goertzel_batch(
-    py::array_t<double, py::array::c_style | py::array::forcecast> x,
-    py::array_t<double, py::array::c_style | py::array::forcecast> frequencies
-) {
-    py::buffer_info x_buf = x.request();
-    py::buffer_info freq_buf = frequencies.request();
-
-    if (x_buf.ndim != 1) {
-        throw std::runtime_error("Input must be 1-dimensional");
+void require_frequency(double f) {
+    if (!fastgoertzel::is_valid_frequency(f)) {
+        throw py::value_error("Frequency must be in [0, 1) range (got " + std::to_string(f) + ")");
     }
-    if (freq_buf.ndim != 1) {
-        throw std::runtime_error("Frequencies must be 1-dimensional");
+}
+
+void require_nonempty(std::size_t n, const char* name) {
+    if (n == 0) {
+        throw py::value_error(std::string(name) + " must contain at least one element");
     }
+}
 
-    double* x_ptr = static_cast<double*>(x_buf.ptr);
-    double* freq_ptr = static_cast<double*>(freq_buf.ptr);
-    size_t x_length = x_buf.shape[0];
-    size_t num_freqs = freq_buf.shape[0];
-
-    py::array_t<double> result(std::vector<pybind11::ssize_t>{
-        static_cast<pybind11::ssize_t>(num_freqs),
-        static_cast<pybind11::ssize_t>(2)
-    });
-    auto result_rw = result.mutable_unchecked<2>();
-
-    // Precompute coefficients for all frequencies (reduces redundant work)
-    std::vector<double> cos_omegas(num_freqs), sin_omegas(num_freqs), coeffs(num_freqs);
-    static constexpr double PI = 3.141592653589793238462643383279502884;
-    for (size_t i = 0; i < num_freqs; ++i) {
-        size_t k = static_cast<size_t>(freq_ptr[i] * x_length);
-        double omega = 2.0 * PI * k / static_cast<double>(x_length);
-        cos_omegas[i] = std::cos(omega);
-        sin_omegas[i] = std::sin(omega);
-        coeffs[i] = 2.0 * cos_omegas[i];
+// Validates every frequency and precomputes the per-bin constants for a window of `n`.
+std::vector<fastgoertzel::BinCoefficients> coefficients_for(const Array& frequencies,
+                                                            std::size_t n) {
+    require_1d(frequencies, "frequencies");
+    const auto f = frequencies.unchecked<1>();
+    std::vector<fastgoertzel::BinCoefficients> out;
+    out.reserve(static_cast<std::size_t>(f.shape(0)));
+    for (py::ssize_t i = 0; i < f.shape(0); ++i) {
+        require_frequency(f(i));
+        out.push_back(fastgoertzel::bin_coefficients(fastgoertzel::frequency_to_bin(f(i), n), n));
     }
+    return out;
+}
 
-    py::gil_scoped_release release; // Release GIL during batch computation
+// ---- functions --------------------------------------------------------------------
 
-    // Parallelize across frequencies
-    #pragma omp parallel for schedule(static)
-    for (ptrdiff_t i = 0; i < static_cast<ptrdiff_t>(num_freqs); ++i) {
-        // Use the precomputed coefficients for each frequency
-        double s_prev = 0.0, s_prev2 = 0.0;
-        double coeff = coeffs[i];
-        double cos_omega = cos_omegas[i];
-        double sin_omega = sin_omegas[i];
+py::tuple goertzel(const Array& x, double frequency) {
+    require_1d(x, "x");
+    const auto n = static_cast<std::size_t>(x.shape(0));
+    require_nonempty(n, "x");
+    require_frequency(frequency);
 
-        // Loop unrolling for speed
-        size_t j = 0;
-        for (; j + 3 < x_length; j += 4) {
-#if defined(__GNUC__) || defined(__clang__)
-            __builtin_prefetch(&x_ptr[j + 16], 0, 1);
+    const auto c = fastgoertzel::bin_coefficients(fastgoertzel::frequency_to_bin(frequency, n), n);
+    const double* data = x.data();
+    fastgoertzel::Result r{};
+    {
+        py::gil_scoped_release release;
+        r = fastgoertzel::goertzel_bin(data, n, c);
+    }
+    return py::make_tuple(r.amplitude, r.phase);
+}
+
+py::array_t<double> goertzel_batch(const Array& x, const Array& frequencies) {
+    require_1d(x, "x");
+    const auto n = static_cast<std::size_t>(x.shape(0));
+    require_nonempty(n, "x");
+    const auto coeffs = coefficients_for(frequencies, n);
+    const auto m = coeffs.size();
+
+    py::array_t<double> result({static_cast<py::ssize_t>(m), py::ssize_t{2}});
+    auto out = result.mutable_unchecked<2>();
+    const double* data = x.data();
+    const bool parallel = n * m >= kParallelThreshold;
+
+    py::gil_scoped_release release;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) if (parallel)
 #endif
-            double s_curr = x_ptr[j] + coeff * s_prev - s_prev2;
-            s_prev2 = s_prev;
-            s_prev = s_curr;
-
-            s_curr = x_ptr[j + 1] + coeff * s_prev - s_prev2;
-            s_prev2 = s_prev;
-            s_prev = s_curr;
-
-            s_curr = x_ptr[j + 2] + coeff * s_prev - s_prev2;
-            s_prev2 = s_prev;
-            s_prev = s_curr;
-
-            s_curr = x_ptr[j + 3] + coeff * s_prev - s_prev2;
-            s_prev2 = s_prev;
-            s_prev = s_curr;
-        }
-        for (; j < x_length; ++j) {
-            double s_curr = x_ptr[j] + coeff * s_prev - s_prev2;
-            s_prev2 = s_prev;
-            s_prev = s_curr;
-        }
-
-        double real_part = cos_omega * s_prev - s_prev2;
-        double imag_part = sin_omega * s_prev;
-        double amplitude = std::sqrt(real_part * real_part + imag_part * imag_part) / (static_cast<double>(x_length) / 2.0);
-        double phase = std::atan2(imag_part, real_part);
-
-        result_rw(i, 0) = amplitude;
-        result_rw(i, 1) = phase;
+    for (std::ptrdiff_t i = 0; i < static_cast<std::ptrdiff_t>(m); ++i) {
+        const auto r = fastgoertzel::goertzel_bin(data, n, coeffs[static_cast<std::size_t>(i)]);
+        out(i, 0) = r.amplitude;
+        out(i, 1) = r.phase;
     }
-
+    (void)parallel;
     return result;
 }
 
-py::array_t<double> goertzel_sliding_batch(
-    py::array_t<double, py::array::c_style | py::array::forcecast> x,
-    size_t window_size,
-    py::array_t<double, py::array::c_style | py::array::forcecast> frequencies
-) {
-    py::buffer_info x_buf = x.request();
-    py::buffer_info freq_buf = frequencies.request();
+py::array_t<double> goertzel_sliding_batch(const Array& x, std::size_t window_size,
+                                           const Array& frequencies) {
+    require_1d(x, "x");
+    const auto total = static_cast<std::size_t>(x.shape(0));
+    require_nonempty(total, "x");
+    if (window_size == 0 || window_size > total) {
+        throw py::value_error("window_size must be in [1, len(x)] (got " +
+                              std::to_string(window_size) + " for len(x) = " +
+                              std::to_string(total) + ")");
+    }
+    const auto coeffs = coefficients_for(frequencies, window_size);
+    const auto m = coeffs.size();
+    const std::size_t n_windows = total - window_size + 1;
 
-    size_t total = x_buf.shape[0];
-    size_t n_windows = total - window_size + 1;
-    size_t n_freqs = freq_buf.shape[0];
+    py::array_t<double> result(
+        {static_cast<py::ssize_t>(n_windows), static_cast<py::ssize_t>(m), py::ssize_t{2}});
+    auto out = result.mutable_unchecked<3>();
+    const double* data = x.data();
+    const bool parallel = n_windows * window_size * m >= kParallelThreshold;
 
-    double* x_ptr = static_cast<double*>(x_buf.ptr);
-    double* freq_ptr = static_cast<double*>(freq_buf.ptr);
-
-    py::array_t<double> result(std::vector<py::ssize_t>{static_cast<py::ssize_t>(n_windows), static_cast<py::ssize_t>(n_freqs), 2});
-    auto result_rw = result.mutable_unchecked<3>();
-
-    #pragma omp parallel for schedule(static)
-    for (ptrdiff_t w = 0; w < static_cast<ptrdiff_t>(n_windows); ++w) {
-        const double* window_ptr = x_ptr + w;
-        for (size_t f = 0; f < n_freqs; ++f) {
-            auto tup = fastgoertzel::GoertzelAlgorithm::compute(window_ptr, window_size, freq_ptr[f]);
-            result_rw(w, f, 0) = std::get<0>(tup); // amplitude
-            result_rw(w, f, 1) = std::get<1>(tup); // phase
+    py::gil_scoped_release release;
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) if (parallel)
+#endif
+    for (std::ptrdiff_t w = 0; w < static_cast<std::ptrdiff_t>(n_windows); ++w) {
+        const double* window = data + w;
+        for (std::size_t f = 0; f < m; ++f) {
+            const auto r = fastgoertzel::goertzel_bin(window, window_size, coeffs[f]);
+            out(w, static_cast<py::ssize_t>(f), 0) = r.amplitude;
+            out(w, static_cast<py::ssize_t>(f), 1) = r.phase;
         }
     }
+    (void)parallel;
     return result;
 }
 
+}  // namespace
 
 PYBIND11_MODULE(_fastgoertzel_core, m) {
-	m.doc() = R"pbdoc(
+    m.doc() = R"pbdoc(
         Fast Goertzel Algorithm Implementation
         ---------------------------------------
-        
+
         High-performance Goertzel algorithm for frequency detection
         implemented in C++ with Python bindings.
-        
+
         .. currentmodule:: fastgoertzel
-        
+
         .. autosummary::
            :toctree: _generate
-           
+
            goertzel
            goertzel_batch
+           goertzel_sliding_batch
     )pbdoc";
 
-    // Main function
-    m.def("goertzel", &goertzel_numpy,
-        py::arg("x"),
-        py::arg("frequency"),
-        R"pbdoc(
-        Compute amplitude and phase using the Goertzel algorithm.
-        
+    m.def("goertzel", &goertzel, py::arg("x"), py::arg("frequency"),
+          R"pbdoc(
+        Compute amplitude and phase of one DFT bin using the Goertzel algorithm.
+
         Parameters
         ----------
-        x : numpy.ndarray
-            1-dimensional array of input samples
+        x : array_like
+            1-dimensional sequence of samples. Converted to a contiguous float64 array.
         frequency : float
-            Normalized frequency to detect (0 to 1, where 1 = sampling rate)
-            
+            Normalized frequency in cycles per sample, in ``[0, 1)``. It is quantized
+            to the DFT bin ``k = floor(frequency * len(x))``.
+
         Returns
         -------
         tuple[float, float]
-            (amplitude, phase) where phase is in radians
-            
+            ``(amplitude, phase)``. ``amplitude`` is ``2 * |X[k]| / len(x)`` (twice the
+            true value at DC and Nyquist). ``phase`` is in radians and cosine-referenced:
+            ``cos(w n + p)`` yields ``p``.
+
+        Raises
+        ------
+        ValueError
+            If ``x`` is not 1-dimensional or is empty, or ``frequency`` is outside ``[0, 1)``.
+
         Examples
         --------
         >>> import numpy as np
         >>> import fastgoertzel
-        >>> 
-        >>> # Generate test signal
-        >>> t = np.arange(0, 512)
-        >>> freq = 1/128  # Normalized frequency
-        >>> signal = np.sin(2 * np.pi * freq * t)
-        >>> 
-        >>> # Detect frequency
-        >>> amp, phase = fastgoertzel.goertzel(signal, freq)
-        >>> print(f"Amplitude: {amp:.4f}, Phase: {phase:.4f}")
-        
+        >>> t = np.arange(512)
+        >>> amp, phase = fastgoertzel.goertzel(np.cos(2 * np.pi * t / 128), 1 / 128)
+        >>> round(amp, 6), round(phase, 6)
+        (1.0, 0.0)
+        )pbdoc");
+
+    m.def("goertzel_batch", &goertzel_batch, py::arg("x"), py::arg("frequencies"),
+          R"pbdoc(
+        Compute amplitude and phase for several frequencies in one call.
+
+        Parameters
+        ----------
+        x : array_like
+            1-dimensional sequence of samples.
+        frequencies : array_like
+            1-dimensional sequence of normalized frequencies, each in ``[0, 1)``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of shape ``(len(frequencies), 2)``; column 0 is amplitude, column 1 phase.
+            Identical to calling :func:`goertzel` once per frequency.
+
         Notes
         -----
-        The Goertzel algorithm is particularly efficient when detecting
-        a small number of frequencies compared to computing a full FFT.
+        Frequencies are processed in parallel with OpenMP when the build supports it and
+        ``len(x) * len(frequencies) >= 65536``. Control the thread count with
+        ``OMP_NUM_THREADS``. The GIL is released during computation.
         )pbdoc");
 
-    // Batch processing function
-    m.def("goertzel_batch", &goertzel_batch,
-        py::arg("x"),
-        py::arg("frequencies"),
-        R"pbdoc(
-        Process multiple frequencies in a single call.
-        
-        Parameters
-        ----------
-        x : numpy.ndarray
-            1-dimensional array of input samples
-        frequencies : numpy.ndarray
-            1-dimensional array of normalized frequencies
-            
-        Returns
-        -------
-        numpy.ndarray
-            2D array of shape (n_frequencies, 2) with amplitudes and phases
-        )pbdoc");
-    
-    // Sliding window batch processing function
-    m.def("goertzel_sliding_batch", &goertzel_sliding_batch,
-        py::arg("x"),
-        py::arg("window_size"),
-        py::arg("frequencies"),
-        R"pbdoc(
-        Compute Goertzel for multiple sliding windows and frequencies in parallel.
+    m.def("goertzel_sliding_batch", &goertzel_sliding_batch, py::arg("x"), py::arg("window_size"),
+          py::arg("frequencies"),
+          R"pbdoc(
+        Compute amplitude and phase for every sliding window and every frequency.
 
         Parameters
         ----------
-        x : numpy.ndarray
-            1-dimensional array of input samples
+        x : array_like
+            1-dimensional sequence of samples.
         window_size : int
-            Size of each sliding window
-        frequencies : numpy.ndarray
-            1-dimensional array of normalized frequencies
-            
+            Length of each window, in ``[1, len(x)]``. Window ``w`` covers
+            ``x[w : w + window_size]``; there are ``len(x) - window_size + 1`` windows.
+        frequencies : array_like
+            1-dimensional sequence of normalized frequencies, each in ``[0, 1)``. They
+            are quantized to bins of the *window*, ``k = floor(frequency * window_size)``.
+
         Returns
         -------
         numpy.ndarray
-            Array of shape (n_windows, n_frequencies, 2) with amplitudes and phases
+            Array of shape ``(n_windows, len(frequencies), 2)``.
 
+        Notes
+        -----
+        Each window is computed from scratch (cost ``window_size`` per window and
+        frequency). Windows are processed in parallel with OpenMP when available and the
+        total work is at least 65536 sample-frequency products. The GIL is released.
         )pbdoc");
 
-    // Add version info
-    #define VERSION_INFO "1.0.2"
-    #ifdef VERSION_INFO
-        m.attr("__version__") = VERSION_INFO;
-    #else
-        m.attr("__version__") = "dev";
-    #endif
+#if defined(VERSION_INFO)
+    m.attr("__version__") = FASTGOERTZEL_STRINGIFY(VERSION_INFO);
+#else
+    m.attr("__version__") = "dev";
+#endif
+#if defined(_OPENMP)
+    m.attr("_has_openmp") = true;
+#else
+    m.attr("_has_openmp") = false;
+#endif
 }
