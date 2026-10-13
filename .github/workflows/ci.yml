@@ -57,7 +57,9 @@ jobs:
           LDFLAGS: -fsanitize=address,undefined
         run: |
           python -m pip install --upgrade pip
-          pip install pybind11 numpy pytest
+          # --no-build-isolation means the build backend must be installed here; Python 3.12
+          # environments no longer ship setuptools by default.
+          pip install "setuptools>=77" "pybind11>=2.12" numpy pytest
           pip install --no-build-isolation -v .
       - name: Run tests under sanitizers
         env:
