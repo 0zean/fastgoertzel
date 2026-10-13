@@ -28,7 +28,7 @@ fix:
 # mypy on the Python sources plus stubtest, which checks _core.pyi against the built module.
 typecheck:
 	uv run mypy
-	uv run python -m mypy.stubtest fastgoertzel._core
+	uv run python -m mypy.stubtest fastgoertzel._core --allowlist tests/stubtest_allowlist.txt
 
 precommit:
 	uv run pre-commit run --all-files

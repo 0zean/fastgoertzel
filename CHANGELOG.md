@@ -6,11 +6,47 @@ All notable changes to this project are documented here. The format follows
 
 ## [2.0.0.dev0] - Unreleased
 
-Work in progress on the 2.0 line. Phase 1 (build system and layout) is complete; the
-algorithmic changes (exact non-integer-bin frequencies, streaming filter, `fs` keyword,
-faster kernels) follow in later phases and will be listed here as they land.
+Work in progress on the 2.0 line. Phases 1 (build system and layout) and 2 (algorithm and
+API) are complete; the kernel speed-ups follow in the next phase.
+
+### Breaking: frequencies are now evaluated exactly
+In 1.x every function rounded `frequency * len(x)` *down* to an integer DFT bin, so
+`goertzel(x, 0.0099)` on 100 samples silently returned the DC bin, and about 6 % of exact
+`k/N` inputs landed on bin `k-1` through floating-point rounding. 2.0 uses the generalized
+Goertzel algorithm: the DTFT is evaluated at exactly the frequency you pass.
+
+Migration: results are unchanged whenever `frequency * len(x)` was an exact integer. If you
+relied on the old bin behaviour, call `goertzel_bin(x, k)` with the integer bin, which is
+identical to `numpy.fft.fft(x)[k]`. Amplitudes at DC and Nyquist are now the true sinusoid
+amplitude (1.x reported twice the value there).
+
+### Added
+- `fs=` keyword on every function and on `GoertzelFilter`: frequencies in hertz (or any
+  unit of `fs`), converted as `frequency / fs`. Addresses the long-standing README TODO.
+- `GoertzelFilter(frequency, *, fs=None)`: stateful streaming filter with `push()` (scalars
+  or arrays, any chunking), `result()`, `result_complex()`, `reset()`, `n_samples`.
+  Addresses the "IIR" README TODO: feed samples as they arrive, read the spectrum any time.
+- `goertzel_complex()` and `goertzel_batch_complex()` return the unscaled complex DTFT
+  value, skipping the `sqrt`/`atan2` of the amplitude form.
+- `goertzel_bin(x, k)`: integer-bin form of the final step, the 1.x computation with an
+  explicit bin.
+- `scale=` keyword: `'amplitude'` (default, DC/Nyquist aware), `'magnitude'` (`|X|`),
+  `'power'` (`|X|**2`, no square root).
+- `threads=` keyword on the batch functions: OpenMP thread count for that call.
+- `step=` keyword on `goertzel_sliding_batch` for strided windows.
+- The final twiddle of the generalized form is reduced modulo one cycle with an
+  error-free product, so accuracy does not degrade for long signals or high frequencies.
 
 ### Changed
+- The recurrence is written as `coeff*s1 + (x - s2)`, which shortens the dependency chain
+  and lets the compiler contract to one FMA where available. Single-frequency throughput
+  on the reference machine rose from about 650 to about 790 million samples per second.
+- Keyword-only arguments after the positional ones; `goertzel(x, f, 8000)` is a
+  `TypeError`, write `goertzel(x, f, fs=8000)`.
+- Build system moved from setuptools to scikit-build-core + CMake. `setup.py` and
+  `MANIFEST.in` are gone; compiler flags, OpenMP detection, and warnings-as-errors live in
+  `CMakeLists.txt`. Build options are passed via `CMAKE_ARGS` (see README).
+  `FASTGOERTZEL_NATIVE=1` becomes `CMAKE_ARGS=-DFASTGOERTZEL_NATIVE=ON`.
 - Build system moved from setuptools to scikit-build-core + CMake. `setup.py` and
   `MANIFEST.in` are gone; compiler flags, OpenMP detection, and warnings-as-errors live in
   `CMakeLists.txt`. Build options are passed via `CMAKE_ARGS` (see README).

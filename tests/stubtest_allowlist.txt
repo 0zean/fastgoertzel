@@ -1,0 +1,5 @@
+# Entries here are regexes of fully qualified names that mypy.stubtest should not report.
+# pybind11 classes use the pybind11_type metaclass, which a stub cannot declare; stubtest
+# therefore reports "metaclass differs" for every bound class. Methods and properties of the
+# class are still checked individually.
+fastgoertzel\._core\.GoertzelFilter

@@ -6,26 +6,30 @@
 fastgoertzel ![GitHub Actions](https://github.com/0zean/fastgoertzel/actions/workflows/ci.yml/badge.svg)
 ============
 
-A Python implementation of the Goertzel algorithm built using `C++` for improved run time and efficiency on large datasets and loops.
+The Goertzel algorithm in C++ with Python bindings: evaluate the spectrum of a real signal at the frequencies you care about, exactly, without computing a full FFT. One frequency, many frequencies, sliding windows, or a streaming filter fed sample by sample.
 
+## API
 
-## Status and roadmap
+| Call | Returns |
+|---|---|
+| `goertzel(x, frequency, *, fs=None, scale="amplitude")` | `(value, phase)` at exactly `frequency` |
+| `goertzel_complex(x, frequency, *, fs=None)` | complex `X = sum x[n] exp(-2j*pi*f*n)` |
+| `goertzel_bin(x, k, *, scale=...)` | `(value, phase)` of DFT bin `k`, same as `np.fft.fft(x)[k]` |
+| `goertzel_batch(x, frequencies, *, fs=None, scale=..., threads=None)` | array `(M, 2)` of `(value, phase)` |
+| `goertzel_batch_complex(x, frequencies, *, fs=None, threads=None)` | complex array `(M,)` |
+| `goertzel_sliding_batch(x, window_size, frequencies, *, step=1, fs=None, scale=..., threads=None)` | array `(n_windows, M, 2)` |
+| `GoertzelFilter(frequency, *, fs=None)` | object with `push(x)`, `result(scale=...)`, `result_complex()`, `reset()`, `n_samples` |
 
-- [x] ~~Improved speed.~~ (Significantly increased speed by using numpy arrays).
-- [x] Benchmarking for speed comparison. See [Performance](#performance) for measured, reproducible numbers. The earlier "~75x faster than native Python" figure was measured against a Python loop that indexes a NumPy array one element at a time; against an idiomatic pure-Python loop the speed-up is 10-15x, and against a vectorised NumPy single-bin DFT it is 5-8x.
-- [x] Batch processing for multiple frequencies (`goertzel_batch`, `goertzel_sliding_batch`).
-- [x] ~~Add IIR and k-th FFT implementation of Goertzel.~~ This is what the library already does: `goertzel` runs the second-order IIR Goertzel filter and evaluates the k-th DFT bin, with `k = floor(frequency * len(x))`. The two things that are genuinely missing are listed separately below.
-- [ ] Generalized Goertzel for non-integer bins: evaluate the DTFT at exactly `frequency` instead of at the nearest-below DFT bin. Planned for 2.0.
-- [ ] Streaming (stateful) filter API that keeps the IIR state between calls, for sample-by-sample or chunked input. Planned for 2.0.
-- [ ] Sampling-rate support (`fs=` keyword, frequencies in Hz). Deliberately deferred until the generalized Goertzel lands: with the current bin truncation, asking for 440 Hz at `fs=44100` with 4096 samples would silently evaluate bin 40, which is 430.7 Hz.
+Conventions, the same for every call:
 
-## Important semantics of the current release
+- **Frequency** is in cycles per sample, `0 <= f < 1`, or in the unit of `fs` when `fs` is given (`f = frequency / fs`). It is evaluated exactly; nothing is rounded to a DFT bin. Frequencies above half the sample rate alias onto their mirror image. If you want integer-bin behaviour, use `goertzel_bin`.
+- **Phase** is cosine-referenced, as in `numpy.fft`: `cos(2*pi*f*n + p)` reports `p`; a sine reports `p - pi/2`.
+- **Scale.** `"amplitude"` (default) is `2|X|/N`, the amplitude of a sinusoid at that frequency, with `|X|/N` at DC and Nyquist where the two spectral lines coincide. `"magnitude"` is `|X|` and `"power"` is `|X|**2` (no square root), both unnormalized. The `*_complex` functions return `X` itself.
+- **Validation.** Every call raises `ValueError` for an empty or non-1-D signal, a frequency outside its range, a non-positive `fs`, a `window_size` outside `[1, len(x)]`, or `step`/`threads` below 1. Nothing you pass can crash the interpreter.
+- **Threads.** `goertzel_batch` and `goertzel_sliding_batch` use OpenMP when the build has it (Linux and Windows wheels; macOS wheels are single-threaded) and the work is at least 65,536 sample-frequency products. `threads=` overrides `OMP_NUM_THREADS` per call; `threads=1` forces serial execution, which gives the most predictable latency. The GIL is released in every call.
+- **Accuracy.** Rounding error of the recurrence grows roughly linearly with the signal length and is largest near DC and Nyquist. Measured against a direct DTFT sum: about 2e-10 relative at N = 1e6 for interior frequencies, about 2e-5 for the first bin. Use float64 input; float32 is converted but offers no speed advantage.
 
-- `frequency` is a normalized frequency in cycles per sample, in `[0, 1)`. It is quantized to a DFT bin: `k = floor(frequency * len(x))`. A frequency that does not fall exactly on a bin is evaluated at the bin below it, and `frequency < 1/len(x)` is evaluated at DC. Pass `k / len(x)` and check `int((k / N) * N) == k` if an exact bin is required; floating-point rounding makes a few percent of `k / N` values truncate to `k - 1` for non-power-of-two `N`.
-- Phase is cosine-referenced, as with `numpy.fft`: `cos(w*n + p)` gives phase `p`, and `sin(w*n + p)` gives `p - pi/2`.
-- Amplitude is `2 * |X[k]| / N`, which recovers the amplitude of a sinusoid at any interior bin. At DC (`k = 0`) and Nyquist (`k = N/2`) this is twice the true amplitude.
-- All three functions validate their inputs and raise `ValueError` for an empty or non-1-D signal, a frequency outside `[0, 1)`, or a `window_size` outside `[1, len(x)]`. Nothing you pass can crash the interpreter (fixed in 1.0.3; earlier releases aborted the process on an invalid frequency in `goertzel_sliding_batch`).
-- `goertzel_batch` and `goertzel_sliding_batch` use OpenMP threads when the build supports it (Linux and Windows wheels; macOS wheels are single-threaded) and the work is large enough. Set `OMP_NUM_THREADS` to control the thread count. The GIL is released in every function.
+Upgrading from 1.x: results are unchanged whenever `frequency * len(x)` was an exact integer. 1.x rounded that product *down* to a bin and reported twice the true amplitude at DC and Nyquist; see `CHANGELOG.md` for the migration note.
 
 ## Installation
 
@@ -57,36 +61,41 @@ The C++ core is header-only (`include/fastgoertzel/goertzel.hpp`) and can be use
 For development, `uv sync` creates the environment and builds the extension; `make check` runs lint, format check, type check, and tests, and `uv run pre-commit install` enables the ruff and clang-format hooks. `make kernel-bench` builds the standalone C++ kernel micro-benchmark.
 
 ## Usage
+
 ```python
 import numpy as np
-import pandas as pd
-
 import fastgoertzel as fg
 
+fs = 44100.0
+t = np.arange(4096)
+x = 0.8 * np.cos(2 * np.pi * 440 / fs * t + 0.3) + 0.1 * np.random.default_rng(0).standard_normal(t.size)
 
-def wave(amp, freq, phase, x):
-    return amp * np.sin(2*np.pi * freq * x + phase)
+# One frequency, in hertz. 440 Hz is not a DFT bin of a 4096-sample window; it is evaluated exactly.
+amp, phase = fg.goertzel(x, 440, fs=fs)
+print(f"440 Hz: amplitude {amp:.3f}, phase {phase:.3f}")        # ~0.8, ~0.3
 
+# Several frequencies at once (OpenMP-parallel for large inputs); power avoids the square root.
+res = fg.goertzel_batch(x, [430, 440, 450], fs=fs, scale="power")
+print(res[:, 0])                                                 # power at each frequency
 
-x = np.arange(0, 512)
-y = wave(1, 1/128, 0, x)
+# Sliding windows: 1024-sample windows every 256 samples, two frequencies.
+win = fg.goertzel_sliding_batch(x, 1024, [440, 880], step=256, fs=fs)
+print(win.shape)                                                 # (13, 2, 2)
 
-amp, phase = fg.goertzel(y, 1/128)
-print(f'Goertzel Amp: {amp:.4f}, phase: {phase:.4f}')
+# Streaming: feed chunks as they arrive, read the spectrum whenever you like.
+flt = fg.GoertzelFilter(440, fs=fs)
+for chunk in np.array_split(x, 16):
+    flt.push(chunk)
+    amp, phase = flt.result()                                    # over everything pushed so far
+print(flt.n_samples, round(amp, 3))
 
-# Compared to max amplitude FFT output
-ft = np.fft.fft(y)
-FFT = pd.DataFrame()
-FFT['amp'] = np.sqrt(ft.real**2 + ft.imag**2) / (len(y) / 2)
-FFT['freq'] = np.fft.fftfreq(ft.size, d=1)
-FFT['phase'] = np.arctan2(ft.imag, ft.real)
-
-max_ = FFT.iloc[FFT['amp'].idxmax()]
-print(f'FFT amp: {max_["amp"]:.4f}, '
-        f'phase: {max_["phase"]:.4f}, '
-        f'freq: {max_["freq"]:.4f}')
-
+# Integer DFT bin, identical to numpy.fft.fft(x)[k].
+amp_k, phase_k = fg.goertzel_bin(x, 41)
+X = np.fft.fft(x)[41]
+assert np.isclose(amp_k, abs(X) * 2 / x.size) and np.isclose(phase_k, np.angle(X))
 ```
+
+When to use it instead of an FFT: the Goertzel algorithm costs about `2 * N` flops per frequency against roughly `2.5 * N * log2(N)` for a full FFT, so it wins when you need fewer than about `log2(N)` frequencies, when the frequencies are not DFT bins, when samples arrive as a stream, or when you want the result for a window without allocating a spectrum. For a dense spectrum, use `numpy.fft`.
 
 ## Performance
 
@@ -101,7 +110,7 @@ Single frequency, `goertzel(x, 0.1)`:
 | 1,000,000 | 1.63 ms | 24 ms (15x) | 9.4 ms (5.8x) | 8.6 ms (5.3x) |
 | 10,000,000 | 16.3 ms | not run | 116 ms (7.1x) | 126 ms (7.7x) |
 
-The single-frequency path runs at about 600 million samples per second on one core. It is bound by the latency of the Goertzel recurrence, so AVX2 and loop unrolling do not change it.
+The single-frequency path ran at about 600 million samples per second on one core in 1.0.x; the 2.0 reformulation of the recurrence (`coeff*s1 + (x - s2)`, one multiply-add on the dependency chain instead of three operations) raises that to about 790 on the same machine with no SIMD involved. The path is bound by the latency of that chain, so AVX2 flags and loop unrolling do not change it; breaking the chain into independent blocks does, and is the next planned step.
 
 Per-call latency matters more than throughput in a real-time loop. The same script reports percentiles over 100,000 individual calls (`--latency-only`). On the machine above, one `goertzel` call on 64 samples has a p50 of 0.6 us and a p99 of 0.8 us, and on 1,024 samples a p50 of 2.0 us and a p99 of 3.5 us, Python call overhead included. Calls that enter an OpenMP region have a much heavier tail: `goertzel_sliding_batch` on 1,024 samples with a 256-sample window and 4 frequencies has a p50 of 59 us but a maximum of about 6 ms. Pin `OMP_NUM_THREADS=1` for predictable latency on small inputs.
 

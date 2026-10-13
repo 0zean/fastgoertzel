@@ -53,7 +53,7 @@ jobs:
       - name: Type check (mypy + stubtest against the built module)
         run: |
           uv run mypy
-          uv run python -m mypy.stubtest fastgoertzel._core
+          uv run python -m mypy.stubtest fastgoertzel._core --allowlist tests/stubtest_allowlist.txt
 
       - name: Test
         run: uv run pytest -q
