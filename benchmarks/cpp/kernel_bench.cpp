@@ -48,8 +48,7 @@ NOINLINE complex<double> kernelC(const double* x, size_t n, double omega) {
     const size_t len = n / NB;
     const double coeff = 2.0 * std::cos(omega);
     double s1[NB], s2[NB];
-    for (int b = 0; b < NB; ++b)
-        s1[b] = s2[b] = 0.0;
+    for (int b = 0; b < NB; ++b) s1[b] = s2[b] = 0.0;
     for (size_t i = 0; i < len; ++i) {
         for (int b = 0; b < NB; ++b) {
             double t = x[b * len + i] - s2[b];
@@ -108,15 +107,13 @@ int main() {
     std::vector<double> x(n);
     std::mt19937_64 rng(1);
     std::normal_distribution<double> nd;
-    for (auto& v : x)
-        v = nd(rng);
+    for (auto& v : x) v = nd(rng);
     const size_t k = 104857;  // ~0.1 cycles/sample, integer bin
     const double omega = 2.0 * PI * static_cast<double>(k) / static_cast<double>(n);
 
     // reference DFT bin
     complex<double> ref = 0.0;
-    for (size_t i = 0; i < n; ++i)
-        ref += x[i] * std::polar(1.0, -omega * static_cast<double>(i));
+    for (size_t i = 0; i < n; ++i) ref += x[i] * std::polar(1.0, -omega * static_cast<double>(i));
 
     volatile double sink = 0.0;
     auto report = [&](const char* name, complex<double> X, double sec) {

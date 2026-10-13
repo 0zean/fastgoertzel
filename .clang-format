@@ -4,9 +4,9 @@ Standard: c++17
 IndentWidth: 4
 ColumnLimit: 100
 AccessModifierOffset: -4
-AllowShortFunctionsOnASingleLine: Inline
-AllowShortIfStatementsOnASingleLine: Never
-AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
 AlignAfterOpenBracket: Align
 BinPackArguments: true
 BinPackParameters: true

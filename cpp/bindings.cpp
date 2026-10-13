@@ -98,9 +98,8 @@ double resolve_frequency(double frequency, const OptDouble& fs) {
     const double f = fs ? frequency / *fs : frequency;
     if (!fgz::is_valid_frequency(f)) {
         if (fs) {
-            throw py::value_error("frequency must be in [0, fs) (got " +
-                                  std::to_string(frequency) + " with fs = " +
-                                  std::to_string(*fs) + ")");
+            throw py::value_error("frequency must be in [0, fs) (got " + std::to_string(frequency) +
+                                  " with fs = " + std::to_string(*fs) + ")");
         }
         throw py::value_error("frequency must be in [0, 1) (got " + std::to_string(frequency) +
                               ")");
@@ -137,7 +136,9 @@ int resolve_threads(const OptInt& threads) {
 }
 
 #if defined(_OPENMP)
-int omp_threads(int requested) noexcept { return requested > 0 ? requested : omp_get_max_threads(); }
+int omp_threads(int requested) noexcept {
+    return requested > 0 ? requested : omp_get_max_threads();
+}
 #endif
 
 py::ssize_t checked_ssize(std::size_t v) { return static_cast<py::ssize_t>(v); }
@@ -220,9 +221,8 @@ py::array_t<double> goertzel_batch(const Array& x, const Array& frequencies, con
 #endif
     for (std::ptrdiff_t i = 0; i < static_cast<std::ptrdiff_t>(m); ++i) {
         const auto idx = static_cast<std::size_t>(i);
-        const fgz::Complex X =
-            fgz::finish_general(fgz::recurrence(data, n, coeffs[idx].coeff), n, coeffs[idx],
-                                freqs[idx]);
+        const fgz::Complex X = fgz::finish_general(fgz::recurrence(data, n, coeffs[idx].coeff), n,
+                                                   coeffs[idx], freqs[idx]);
         out(i, 0) = scaled(X, n, fgz::is_dc_or_nyquist(freqs[idx]), sc);
         out(i, 1) = fgz::phase(X);
     }
@@ -254,9 +254,8 @@ py::array_t<std::complex<double>> goertzel_batch_complex(const Array& x, const A
 #endif
     for (std::ptrdiff_t i = 0; i < static_cast<std::ptrdiff_t>(m); ++i) {
         const auto idx = static_cast<std::size_t>(i);
-        const fgz::Complex X =
-            fgz::finish_general(fgz::recurrence(data, n, coeffs[idx].coeff), n, coeffs[idx],
-                                freqs[idx]);
+        const fgz::Complex X = fgz::finish_general(fgz::recurrence(data, n, coeffs[idx].coeff), n,
+                                                   coeffs[idx], freqs[idx]);
         out(i) = std::complex<double>(X.re, X.im);
     }
     return result;
@@ -304,8 +303,8 @@ py::array_t<double> goertzel_sliding_batch(const Array& x, py::ssize_t window_si
     for (std::ptrdiff_t wi = 0; wi < static_cast<std::ptrdiff_t>(n_windows); ++wi) {
         const double* window = data + static_cast<std::size_t>(wi) * st;
         for (std::size_t fi = 0; fi < m; ++fi) {
-            const fgz::Complex X = fgz::finish_general(
-                fgz::recurrence(window, w, coeffs[fi].coeff), w, coeffs[fi], freqs[fi]);
+            const fgz::Complex X = fgz::finish_general(fgz::recurrence(window, w, coeffs[fi].coeff),
+                                                       w, coeffs[fi], freqs[fi]);
             out(wi, static_cast<py::ssize_t>(fi), 0) = scaled(X, w, edge[fi], sc);
             out(wi, static_cast<py::ssize_t>(fi), 1) = fgz::phase(X);
         }
@@ -346,8 +345,8 @@ struct PyFilter {
     py::tuple result(const std::string& scale) const {
         const Scale sc = parse_scale(scale);
         const fgz::Complex X = result_or_throw();
-        return py::make_tuple(
-            scaled(X, core.count(), fgz::is_dc_or_nyquist(core.frequency()), sc), fgz::phase(X));
+        return py::make_tuple(scaled(X, core.count(), fgz::is_dc_or_nyquist(core.frequency()), sc),
+                              fgz::phase(X));
     }
 
     std::complex<double> result_complex() const {
@@ -425,8 +424,8 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
         (1.0, 0.25)
         )pbdoc");
 
-    m.def("goertzel_complex", &goertzel_complex, py::arg("x"), py::arg("frequency"),
-          py::kw_only(), py::arg("fs") = py::none(),
+    m.def("goertzel_complex", &goertzel_complex, py::arg("x"), py::arg("frequency"), py::kw_only(),
+          py::arg("fs") = py::none(),
           R"pbdoc(
         Unscaled complex DTFT value ``X = sum x[n] exp(-2j*pi*f*n)`` at ``frequency``.
 
@@ -544,7 +543,8 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
              "``scale``. Raises ``ValueError`` before the first push.")
         .def("result_complex", &PyFilter::result_complex,
              "Unscaled complex DTFT value over all samples pushed so far.")
-        .def("reset", [](PyFilter& self) { self.core.reset(); }, "Forget all pushed samples.")
+        .def(
+            "reset", [](PyFilter& self) { self.core.reset(); }, "Forget all pushed samples.")
         .def_property_readonly(
             "n_samples", [](const PyFilter& self) { return self.core.count(); },
             "Number of samples pushed since construction or the last reset.")
