@@ -1,13 +1,13 @@
 [build-system]
 requires = [
-    "setuptools>=77",
+    "scikit-build-core>=0.10",
     "pybind11>=2.12",
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "fastgoertzel"
-version = "1.0.3"
+version = "2.0.0.dev0"
 description = "High-performance Goertzel algorithm implementation in C++ with Python bindings"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,13 +51,43 @@ test = ["pytest>=7.0"]
 dev = [
     "build>=1.3.0",
     "bumpver>=2025.1131",
+    "mypy>=1.14",
+    "pre-commit>=4.0",
     "pybind11>=2.12",
     "pytest>=8.4.2",
     "pytest-benchmark>=5.1.0",
     "ruff>=0.14.1",
-    "setuptools>=77",
-    "wheel>=0.45.1",
+    "scikit-build-core>=0.10",
 ]
+
+# ---------------------------------------------------------------------------
+# Build (scikit-build-core drives CMakeLists.txt)
+# ---------------------------------------------------------------------------
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.18"
+cmake.build-type = "Release"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["src/fastgoertzel"]
+# The sdist contains every file not ignored by .gitignore, minus these.
+sdist.exclude = [
+    ".github/**",
+    ".idea/**",
+    ".vs/**",
+    ".vscode/**",
+    "**/__pycache__/**",
+    "*.pyc",
+    "PLAN.md",
+    "test.py",
+    "CppProperties.json",
+    "*.json",
+    "docs/_static/**",
+]
+
+# Local overrides without editing this file:
+#   CMAKE_ARGS="-DFASTGOERTZEL_NATIVE=ON" pip install .          tune for this machine
+#   CMAKE_ARGS="-DFASTGOERTZEL_OPENMP=OFF" pip install .         single-threaded build
+#   CMAKE_ARGS="-DOpenMP_ROOT=$(brew --prefix libomp)" pip install .   OpenMP on macOS
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -73,6 +103,11 @@ extend-select = ["I"]
 [tool.ruff.lint.isort]
 known-first-party = ["fastgoertzel"]
 
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["src/fastgoertzel", "benchmarks/benchmark.py"]
+
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-*"
 skip = "*-musllinux_i686"
@@ -87,22 +122,24 @@ repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 
 [tool.cibuildwheel.macos]
 # Both architectures are built on the arm64 runner; x86_64 wheels are tested under Rosetta
-# when available and skipped otherwise.
+# when available and skipped otherwise. Apple Clang has no OpenMP, so macOS wheels are
+# single-threaded (see README).
 archs = ["x86_64", "arm64"]
 test-skip = "*-macosx_x86_64"
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64", "i686"]
 
-[bumpver]
-current_version = "1.0.3"
-version_pattern = "MAJOR.MINOR.PATCH"
+[tool.bumpver]
+current_version = "2.0.0.dev0"
+# Accepts 2.0.0 and pre-releases such as 2.0.0.dev0; `bumpver update --tag final` drops the tag.
+version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 commit_message = "Bump version to {new_version}"
 commit = true
 tag = true
 push = false
 
-[bumpver.file_patterns]
+[tool.bumpver.file_patterns]
 "pyproject.toml" = [
     '^version = "{version}"$',
     '^current_version = "{version}"$',

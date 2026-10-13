@@ -75,7 +75,7 @@ jobs:
             done
           done
           if [ "$found" != "0" ]; then
-            echo "::error::Linux wheel contains AVX/AVX-512 code; the ISA policy forbids it (see the flag policy in setup.py)"
+            echo "::error::Linux wheel contains AVX/AVX-512 code; the ISA policy forbids it (see the flag policy in CMakeLists.txt)"
             exit 1
           fi
 

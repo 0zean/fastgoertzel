@@ -34,6 +34,7 @@ was measured against and the thread count.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import math
 import os
@@ -44,7 +45,7 @@ import sys
 import time
 import timeit
 from dataclasses import asdict, dataclass
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
 
@@ -137,7 +138,7 @@ def ratio(ref: Timing, fg: Timing) -> str:
     return f"{ref.seconds_min / fg.seconds_min:5.1f}x"
 
 
-def environment(threads: str) -> dict:
+def environment(threads: str) -> dict[str, Any]:
     import fastgoertzel
 
     cpu = platform.processor()
@@ -168,11 +169,11 @@ def environment(threads: str) -> dict:
 
 def bench_single(
     sizes: list[int], repeat: int, with_python: bool, rng: np.random.Generator
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     import fastgoertzel as fg
 
     f = 0.1
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== goertzel(x, f): one frequency ===")
     print(
         f"{'N':>10} | {'fastgoertzel':>12} {'MS/s':>7} | {'pure Python':>12} {'x':>6} | {'NumPy 2x dot':>12} {'x':>6} | {'np.fft.rfft':>12} {'x':>6}"
@@ -210,10 +211,12 @@ def bench_single(
     return rows
 
 
-def bench_batch(cases: list[tuple[int, int]], repeat: int, rng: np.random.Generator) -> list[dict]:
+def bench_batch(
+    cases: list[tuple[int, int]], repeat: int, rng: np.random.Generator
+) -> list[dict[str, Any]]:
     import fastgoertzel as fg
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== goertzel_batch(x, freqs): N samples x M frequencies ===")
     print(
         f"{'N':>10} {'M':>4} | {'fg batch':>12} | {'M x goertzel':>12} {'x':>6} | {'np.fft.rfft':>12} {'x':>6} | {'M x NumPy dot':>13} {'x':>6}"
@@ -239,10 +242,10 @@ def bench_batch(cases: list[tuple[int, int]], repeat: int, rng: np.random.Genera
 
 def bench_sliding(
     cases: list[tuple[int, int, int]], repeat: int, rng: np.random.Generator
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     import fastgoertzel as fg
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== goertzel_sliding_batch(x, W, freqs): N samples, window W, M frequencies ===")
     print(f"{'N':>8} {'W':>5} {'M':>4} | {'fg sliding':>12} | {'NumPy windows+rfft':>18} {'x':>6}")
     for n, w, m in cases:
@@ -262,7 +265,7 @@ def bench_sliding(
     return rows
 
 
-def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict]:
+def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict[str, Any]]:
     """Re-run the OpenMP functions in subprocesses with OMP_NUM_THREADS pinned."""
     code = (
         "import numpy as np, fastgoertzel as fg, timeit\n"
@@ -272,7 +275,7 @@ def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict]:
         f"t=timeit.Timer(lambda: fg.goertzel_sliding_batch(y,256,fr2)); n,_=t.autorange(); s=min(t.repeat({repeat},n))/n\n"
         "print(b, s)"
     )
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== OpenMP scaling: batch (N=1e6, M=32) and sliding (N=1e5, W=256, M=8) ===")
     for th in thread_counts:
         env = dict(os.environ)
@@ -294,7 +297,9 @@ def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict]:
     return rows
 
 
-def latency_percentiles(fn: Callable[[], object], calls: int, warmup: int = 2_000) -> dict:
+def latency_percentiles(
+    fn: Callable[[], object], calls: int, warmup: int = 2_000
+) -> dict[str, Any]:
     """Time `calls` individual invocations and return percentiles in microseconds."""
     for _ in range(warmup):
         fn()
@@ -317,7 +322,7 @@ def latency_percentiles(fn: Callable[[], object], calls: int, warmup: int = 2_00
     }
 
 
-def bench_latency(calls: int, rng: np.random.Generator) -> list[dict]:
+def bench_latency(calls: int, rng: np.random.Generator) -> list[dict[str, Any]]:
     """Per-call latency for the small inputs typical of a real-time loop.
 
     Each case is a single Python-level call; the numbers therefore include argument
@@ -330,7 +335,7 @@ def bench_latency(calls: int, rng: np.random.Generator) -> list[dict]:
     cases: list[tuple[str, Callable[[], object]]] = []
     for n in (64, 256, 1_024, 4_096):
         x = rng.standard_normal(n)
-        cases.append((f"goertzel        N={n:<6}", lambda x=x: fg.goertzel(x, 0.1)))
+        cases.append((f"goertzel        N={n:<6}", functools.partial(fg.goertzel, x, 0.1)))
     x256 = rng.standard_normal(256)
     x65k = rng.standard_normal(65_536)
     f8 = np.linspace(0.05, 0.45, 8)
@@ -344,7 +349,7 @@ def bench_latency(calls: int, rng: np.random.Generator) -> list[dict]:
     cases.append(("np.fft.rfft     N=256 (reference)", lambda: np.fft.rfft(ref)))
     cases.append(("NumPy 2x dot    N=256 (reference)", lambda: np_single_bin(ref, 0.1)))
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print(f"=== per-call latency, {calls} calls each (microseconds) ===")
     print(f"{'case':<40} {'p50':>8} {'p90':>8} {'p99':>8} {'p99.9':>8} {'max':>9} {'mean':>8}")
     for name, fn in cases:
@@ -432,7 +437,7 @@ def main() -> None:
 
     rng = np.random.default_rng(1)
     calls = args.calls or (10_000 if args.quick else 100_000)
-    report: dict = {
+    report: dict[str, Any] = {
         "environment": env,
         "methodology": (
             "throughput: timeit.autorange number, min and median of repeat rounds, ratios use "

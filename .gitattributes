@@ -1,0 +1,6 @@
+# Normalise line endings to LF in the repository and the working copy on every platform,
+# matching .editorconfig and the pre-commit mixed-line-ending hook.
+* text=auto eol=lf
+
+*.png binary
+*.whl binary

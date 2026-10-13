@@ -13,7 +13,7 @@ goertzel_sliding_batch(x, window_size, frequencies)
 See the README for the frequency-to-bin mapping and the phase/amplitude conventions.
 """
 
-from ._fastgoertzel_core import (
+from ._core import (
     __version__,
     goertzel,
     goertzel_batch,

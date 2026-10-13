@@ -34,16 +34,27 @@ From PyPI (wheels for Linux, macOS, and Windows, plus a source distribution):
 pip install fastgoertzel
 ```
 
-From source (needs a C++17 compiler):
+From source (needs a C++17 compiler; CMake and Ninja are fetched automatically if missing):
 ```bash
 git clone https://github.com/0zean/fastgoertzel.git
 cd fastgoertzel
 pip install .
 ```
 
-Published wheels are compiled for baseline x86-64 and arm64 so that they run on any CPU. When building from source for your own machine you can opt in to CPU-specific tuning with `FASTGOERTZEL_NATIVE=1 pip install .` (not Windows). On macOS, Apple's compiler has no OpenMP; to enable threading install `libomp` with Homebrew and set `FASTGOERTZEL_OPENMP_FLAGS` as described at the top of `setup.py`.
+Published wheels are compiled for baseline x86-64 and arm64 so that they run on any CPU. The build is driven by `CMakeLists.txt` through scikit-build-core, and its options are passed with the `CMAKE_ARGS` environment variable:
 
-For development, `uv sync` creates the environment and builds the extension in place; `make check` runs lint, format check, and tests.
+| Option | Default | Effect |
+|---|---|---|
+| `-DFASTGOERTZEL_NATIVE=ON` | OFF | Tune for the build machine (`-march=native`). Never used for wheels. |
+| `-DFASTGOERTZEL_OPENMP=OFF` | ON | Single-threaded build even when OpenMP is available. |
+| `-DOpenMP_ROOT=$(brew --prefix libomp)` | unset | Enable OpenMP on macOS after `brew install libomp`; Apple's compiler has none, so macOS wheels are single-threaded. |
+| `-DFASTGOERTZEL_WERROR=ON` | OFF | Warnings as errors (CI uses this). |
+
+For example `CMAKE_ARGS="-DFASTGOERTZEL_NATIVE=ON" pip install .`.
+
+The C++ core is header-only (`include/fastgoertzel/goertzel.hpp`) and can be used without Python; the CMake target is `fastgoertzel::core`.
+
+For development, `uv sync` creates the environment and builds the extension; `make check` runs lint, format check, type check, and tests, and `uv run pre-commit install` enables the ruff and clang-format hooks. `make kernel-bench` builds the standalone C++ kernel micro-benchmark.
 
 ## Usage
 ```python
@@ -63,7 +74,7 @@ y = wave(1, 1/128, 0, x)
 amp, phase = fg.goertzel(y, 1/128)
 print(f'Goertzel Amp: {amp:.4f}, phase: {phase:.4f}')
 
-# Compared to max amplitude FFT output 
+# Compared to max amplitude FFT output
 ft = np.fft.fft(y)
 FFT = pd.DataFrame()
 FFT['amp'] = np.sqrt(ft.real**2 + ft.imag**2) / (len(y) / 2)

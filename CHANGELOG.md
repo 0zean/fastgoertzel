@@ -4,7 +4,33 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [1.0.3] - Unreleased
+## [2.0.0.dev0] - Unreleased
+
+Work in progress on the 2.0 line. Phase 1 (build system and layout) is complete; the
+algorithmic changes (exact non-integer-bin frequencies, streaming filter, `fs` keyword,
+faster kernels) follow in later phases and will be listed here as they land.
+
+### Changed
+- Build system moved from setuptools to scikit-build-core + CMake. `setup.py` and
+  `MANIFEST.in` are gone; compiler flags, OpenMP detection, and warnings-as-errors live in
+  `CMakeLists.txt`. Build options are passed via `CMAKE_ARGS` (see README).
+  `FASTGOERTZEL_NATIVE=1` becomes `CMAKE_ARGS=-DFASTGOERTZEL_NATIVE=ON`.
+- Repository layout: Python package in `src/fastgoertzel/`, header-only C++ core in
+  `include/fastgoertzel/goertzel.hpp` (CMake target `fastgoertzel::core`), bindings in
+  `cpp/bindings.cpp`, C++ micro-benchmark in `benchmarks/cpp/`.
+- The private extension module is renamed from `fastgoertzel._fastgoertzel_core` to
+  `fastgoertzel._core`. Import from `fastgoertzel` as before.
+- The module declares itself safe for free-threaded CPython (`py::mod_gil_not_used`); it
+  holds no mutable global state.
+- Warnings raised to `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`
+  (`/W4 /permissive-` on MSVC) and treated as errors in CI.
+
+### Added
+- `.clang-format`, `.editorconfig`, and a pre-commit configuration (ruff, clang-format,
+  whitespace and line-ending hygiene); CI runs the hooks.
+- mypy (strict) and `stubtest` in CI, so `_core.pyi` is checked against the built module.
+
+## [1.0.3] - 2026-10-13
 
 Patch release: crash safety, portable wheels, correct metadata. Results for valid inputs
 are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit on arm64).

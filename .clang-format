@@ -1,0 +1,18 @@
+# Style for the C++ sources (include/, cpp/, benchmarks/cpp/).
+BasedOnStyle: Google
+Standard: c++17
+IndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlignAfterOpenBracket: Align
+BinPackArguments: true
+BinPackParameters: true
+BreakBeforeBraces: Attach
+DerivePointerAlignment: false
+PointerAlignment: Left
+IncludeBlocks: Preserve
+SortIncludes: CaseSensitive
+SpacesBeforeTrailingComments: 2

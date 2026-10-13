@@ -9,9 +9,9 @@
 //     the process),
 //   * releasing the GIL for the numeric work,
 //   * optional OpenMP parallelism for the batch functions.
-// The numeric kernel lives in goertzel.hpp and is noexcept.
+// The numeric kernel lives in include/fastgoertzel/goertzel.hpp and is noexcept.
 
-#include "goertzel.hpp"
+#include "fastgoertzel/goertzel.hpp"
 
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
@@ -121,8 +121,8 @@ py::array_t<double> goertzel_sliding_batch(const Array& x, std::size_t window_si
     require_nonempty(total, "x");
     if (window_size == 0 || window_size > total) {
         throw py::value_error("window_size must be in [1, len(x)] (got " +
-                              std::to_string(window_size) + " for len(x) = " +
-                              std::to_string(total) + ")");
+                              std::to_string(window_size) +
+                              " for len(x) = " + std::to_string(total) + ")");
     }
     const auto coeffs = coefficients_for(frequencies, window_size);
     const auto m = coeffs.size();
@@ -152,7 +152,9 @@ py::array_t<double> goertzel_sliding_batch(const Array& x, std::size_t window_si
 
 }  // namespace
 
-PYBIND11_MODULE(_fastgoertzel_core, m) {
+// The module keeps no mutable global state and every function only reads its inputs, so it
+// is safe under free-threaded CPython (the flag is a no-op on GIL-enabled builds).
+PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
     m.doc() = R"pbdoc(
         Fast Goertzel Algorithm Implementation
         ---------------------------------------
