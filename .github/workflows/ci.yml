@@ -78,15 +78,16 @@ jobs:
         # vptr is excluded: pybind11 builds with -fvisibility=hidden, so the std::exception
         # vtable inside the module differs from libstdc++'s and the vptr check reports a
         # false type mismatch on the first exception pybind11 translates to Python.
-        # -Wno-array-bounds: with -fsanitize=address GCC 12/13 reports a false positive
-        # inside pybind11's type registration (std::vector = {tinfo}); it does not occur
-        # without sanitizers, so warnings-as-errors stays on for everything else.
+        # Warnings are NOT errors in this job: sanitizer instrumentation makes GCC 12/13
+        # emit false positives inside pybind11's type registration (-Warray-bounds,
+        # -Wstringop-overread on `std::vector = {tinfo}`). The regular ubuntu job compiles
+        # the same sources with the same compiler under -Werror, so nothing is lost.
         # scikit-build-core takes the build type from its own variable, not CMAKE_ARGS.
         env:
           CFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer -g
-          CXXFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer -g -Wno-array-bounds
+          CXXFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer -g
           LDFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr
-          CMAKE_ARGS: -DFASTGOERTZEL_WERROR=ON
+          CMAKE_ARGS: -DFASTGOERTZEL_WERROR=OFF
           SKBUILD_CMAKE_BUILD_TYPE: RelWithDebInfo
         run: |
           python -m pip install --upgrade pip
