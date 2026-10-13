@@ -68,9 +68,17 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        # python is a C executable, so libstdc++ is not loaded when the preloaded ASan runtime
+        # installs its interceptors; without libstdc++ in LD_PRELOAD the real __cxa_throw cannot
+        # be resolved and the first C++ exception aborts the process. --capture=no keeps the
+        # sanitizer/terminate output visible (pytest's fd capture otherwise swallows it).
         run: |
-          export LD_PRELOAD=$(gcc -print-file-name=libasan.so)
-          pytest -q -p no:cacheprovider
+          export LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libstdc++.so.6)"
+          echo "LD_PRELOAD=$LD_PRELOAD"
+          echo "--- exception smoke test (expect ValueError) ---"
+          python -c "import fastgoertzel as fg; fg.goertzel([1.0, 2.0], 1.5)" 2>&1 | tail -n 3 || true
+          echo "--- test suite ---"
+          pytest -x -q -p no:cacheprovider --capture=no
 
   wheel-smoke:
     name: cibuildwheel smoke (${{ matrix.os }})
