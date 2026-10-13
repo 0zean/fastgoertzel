@@ -51,10 +51,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build with sanitizers
+        # vptr is excluded: pybind11 builds with -fvisibility=hidden, so the std::exception
+        # vtable inside the module differs from libstdc++'s and the vptr check reports a
+        # false type mismatch on the first exception pybind11 translates to Python.
         env:
-          CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
-          CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer -g
-          LDFLAGS: -fsanitize=address,undefined
+          CFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer -g
+          CXXFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr -fno-omit-frame-pointer -g
+          LDFLAGS: -fsanitize=address,undefined -fno-sanitize=vptr
         run: |
           python -m pip install --upgrade pip
           # --no-build-isolation means the build backend must be installed here; Python 3.12
