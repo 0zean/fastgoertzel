@@ -58,6 +58,11 @@ jobs:
       - name: Test
         run: uv run pytest -q
 
+      - name: Test with the baseline (non-AVX2) kernel build
+        env:
+          FASTGOERTZEL_KERNEL: baseline
+        run: uv run pytest -q tests/test_kernels.py tests/test_goertzel.py
+
       - name: Benchmark smoke test
         run: uv run python benchmarks/benchmark.py --quick --no-python --no-threads --no-latency
 

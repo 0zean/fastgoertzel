@@ -6,6 +6,8 @@ from numpy.typing import ArrayLike, NDArray
 
 __version__: str
 _has_openmp: bool
+# "avx2" or "baseline": the hot-loop build selected at import (FASTGOERTZEL_KERNEL overrides).
+_kernel: str
 
 _Scale = Literal["amplitude", "magnitude", "power"]
 

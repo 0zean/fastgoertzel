@@ -6,8 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [2.0.0.dev0] - Unreleased
 
-Work in progress on the 2.0 line. Phases 1 (build system and layout) and 2 (algorithm and
-API) are complete; the kernel speed-ups follow in the next phase.
+Work in progress on the 2.0 line. Phases 1 (build system and layout), 2 (algorithm and
+API) and 3 (kernel speed-ups) are complete.
+
+### Performance (Phase 3)
+Measured on the reference machine (i9-14900KF, MSVC, AVX2+FMA kernel); see README.
+- One frequency: 2.5 billion samples/s single-threaded, up from 0.65 in 1.0.3 (3.9x).
+  Signals of 4,096 samples or more run as up to eight independent blocks whose results
+  are combined with exact twiddles, which removes the recurrence's latency bound.
+- Batch: up to eight frequencies share one pass over the signal; fewer frequencies are
+  padded with signal blocks so eight chains always run. N = 1e6, M = 32: 12.6 ms on one
+  thread (was 48.8 ms), 1.06 ms on 32 threads (was 2.25 ms).
+- Sliding windows: sliding-DFT update with an exact re-synchronisation every 256
+  windows; cost per hop no longer depends on the window length. N = 1e5, W = 256, M = 8:
+  11.8 ms on one thread (was 362 ms), 2.5 ms on 32 threads (was 17 ms). Step sizes of
+  `window_size / 4` or more fall back to exact per-window evaluation.
+- Runtime dispatch: the hot loops are compiled for baseline x86-64 and for AVX2+FMA and
+  selected at import. Wheels stay portable; `FASTGOERTZEL_KERNEL=baseline|avx2` overrides
+  the choice and `fastgoertzel._core._kernel` reports it. The release workflow now runs
+  the test suite under QEMU with a pre-AVX CPU model instead of grepping for AVX
+  instructions.
+- Results are independent of the thread count: the lane decomposition depends only on the
+  input sizes, and combination order is fixed.
 
 ### Breaking: frequencies are now evaluated exactly
 In 1.x every function rounded `frequency * len(x)` *down* to an integer DFT bin, so

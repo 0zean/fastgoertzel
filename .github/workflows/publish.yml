@@ -53,31 +53,30 @@ jobs:
           path: ./wheelhouse/*.whl
 
   isa-policy:
-    name: Verify Linux wheels contain no AVX code
+    name: Verify the Linux wheel runs on a CPU without AVX
     needs: wheels
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: wheels-ubuntu-latest
           path: wheelhouse
-      - name: Disassemble x86_64 extension modules and look for AVX register use
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The hot loops exist in a baseline and an AVX2+FMA build selected at import. Running
+      # the test suite under QEMU with a pre-AVX CPU model proves that the baseline build is
+      # chosen and that no AVX instruction is reachable outside the dispatched kernel.
+      - name: Install the x86_64 wheel and run the tests under qemu -cpu Nehalem
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq binutils unzip
-          found=0
-          for whl in wheelhouse/*x86_64*.whl; do
-            rm -rf /tmp/w && mkdir -p /tmp/w && unzip -q -o "$whl" -d /tmp/w
-            for so in $(find /tmp/w/fastgoertzel -name '_fastgoertzel_core*.so'); do
-              n=$(objdump -d "$so" | grep -cE '%(y|z)mm' || true)
-              echo "$whl: $(basename "$so"): $n AVX instructions"
-              if [ "$n" != "0" ]; then found=1; fi
-            done
-          done
-          if [ "$found" != "0" ]; then
-            echo "::error::Linux wheel contains AVX/AVX-512 code; the ISA policy forbids it (see the flag policy in CMakeLists.txt)"
-            exit 1
-          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user
+          python -m pip install --upgrade pip
+          pip install pytest numpy
+          pip install --no-index --find-links wheelhouse "fastgoertzel"
+          qemu-x86_64 -cpu Nehalem "$(which python)" -c "from fastgoertzel import _core; print('kernel:', _core._kernel); assert _core._kernel == 'baseline'"
+          qemu-x86_64 -cpu Nehalem "$(which python)" -m pytest tests -q -p no:cacheprovider -x
 
   publish:
     name: Upload to PyPI

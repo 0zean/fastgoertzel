@@ -113,17 +113,27 @@ inline double fractional_cycles(double f, double m) noexcept {
     return frac;
 }
 
+/// Multiplies v by e^{-j 2 pi cycles}; `cycles` should already be reduced to [0, 1).
+inline Complex rotate_by_cycles(Complex v, double cycles) noexcept {
+    const double ang = -kTwoPi * cycles;
+    const double tr = std::cos(ang);
+    const double ti = std::sin(ang);
+    return Complex{v.re * tr - v.im * ti, v.re * ti + v.im * tr};
+}
+
+/// Generalized final step given the twiddle in cycles: X = e^{-j 2 pi cycles} (s1 - e^{-jw} s2),
+/// where `cycles` is f*(n-1) reduced modulo 1 for a chain of n samples (see finish_general).
+inline Complex finish_with_cycles(State s, const Coefficients& c, double cycles) noexcept {
+    return rotate_by_cycles(Complex{s.s1 - c.cos_w * s.s2, c.sin_w * s.s2}, cycles);
+}
+
 /// X(omega) after n >= 1 samples, for any omega: e^{-j omega (n-1)} (s1 - e^{-j omega} s2).
 /// `cycles_per_sample` must equal c.omega / (2 pi); it is passed separately so the final
 /// twiddle can be reduced modulo one cycle exactly instead of through a huge angle.
 inline Complex finish_general(State s, std::size_t n, const Coefficients& c,
                               double cycles_per_sample) noexcept {
-    const double yr = s.s1 - c.cos_w * s.s2;  // y = s1 - e^{-jw} s2
-    const double yi = c.sin_w * s.s2;
-    const double ang = -kTwoPi * fractional_cycles(cycles_per_sample, static_cast<double>(n - 1));
-    const double tr = std::cos(ang);
-    const double ti = std::sin(ang);
-    return Complex{yr * tr - yi * ti, yr * ti + yi * tr};
+    return finish_with_cycles(s, c,
+                              fractional_cycles(cycles_per_sample, static_cast<double>(n - 1)));
 }
 
 /// One-shot DFT bin k of x[0..n). Requires n >= 1 and k < n.

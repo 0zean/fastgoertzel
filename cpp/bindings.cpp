@@ -2,25 +2,29 @@
 //
 // pybind11 layer for fastgoertzel.
 //
-// Responsibilities of this file, and only this file:
+// Responsibilities of this file:
 //   * argument conversion (any array-like -> contiguous float64),
 //   * validation, raising ValueError *before* the GIL is released and before any
 //     OpenMP region is entered (an exception escaping an OpenMP region terminates
 //     the process),
-//   * releasing the GIL for the numeric work,
-//   * optional OpenMP parallelism for the batch functions.
-// The numeric kernel lives in include/fastgoertzel/goertzel.hpp and is noexcept.
+//   * work decomposition: (frequency, block) lanes for the lane kernel, (frequency, chunk)
+//     items for the sliding DFT, OpenMP over items, deterministic combination,
+//   * releasing the GIL for the numeric work.
+// Hot loops live in lane_kernels.inl and are reached through kernels::active_api().
 
 #include "fastgoertzel/goertzel.hpp"
+#include "kernels_api.hpp"
 
 #include <pybind11/complex.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -34,6 +38,7 @@
 
 namespace py = pybind11;
 namespace fgz = fastgoertzel;
+namespace fgk = fastgoertzel::kernels;
 
 namespace {
 
@@ -43,6 +48,12 @@ using OptInt = std::optional<int>;
 
 // Below this much work (samples * frequencies) an OpenMP region costs more than it saves.
 constexpr std::size_t kParallelThreshold = std::size_t{1} << 16;
+// Blocks shorter than this are not worth a lane of their own.
+constexpr std::size_t kMinBlock = 512;
+// Sliding DFT: windows per chunk between exact re-synchronisations.
+constexpr std::size_t kSlidingChunk = 256;
+// Lane groups a large batch is cut into, independent of the actual thread count.
+constexpr std::size_t kPlanParallelism = 32;
 
 // ---- scale ------------------------------------------------------------------------
 
@@ -55,7 +66,6 @@ Scale parse_scale(const std::string& s) {
     throw py::value_error("scale must be 'amplitude', 'magnitude' or 'power' (got '" + s + "')");
 }
 
-// Value reported for X given the scale; `dc_or_nyquist` only matters for Amplitude.
 double scaled(fgz::Complex X, std::size_t n, bool dc_or_nyquist, Scale scale) noexcept {
     switch (scale) {
         case Scale::Amplitude:
@@ -78,9 +88,7 @@ void require_1d(const Array& a, const char* name) {
 }
 
 void require_nonempty(std::size_t n, const char* name) {
-    if (n == 0) {
-        throw py::value_error(std::string(name) + " must contain at least one element");
-    }
+    if (n == 0) throw py::value_error(std::string(name) + " must contain at least one element");
 }
 
 void require_fs(const OptDouble& fs) {
@@ -112,9 +120,7 @@ std::vector<double> resolve_frequencies(const Array& frequencies, const OptDoubl
     const auto f = frequencies.unchecked<1>();
     std::vector<double> out;
     out.reserve(static_cast<std::size_t>(f.shape(0)));
-    for (py::ssize_t i = 0; i < f.shape(0); ++i) {
-        out.push_back(resolve_frequency(f(i), fs));
-    }
+    for (py::ssize_t i = 0; i < f.shape(0); ++i) out.push_back(resolve_frequency(f(i), fs));
     return out;
 }
 
@@ -135,21 +141,226 @@ int resolve_threads(const OptInt& threads) {
     return *threads;
 }
 
+int effective_threads(int requested) noexcept {
 #if defined(_OPENMP)
-int omp_threads(int requested) noexcept {
     return requested > 0 ? requested : omp_get_max_threads();
-}
+#else
+    (void)requested;
+    return 1;
 #endif
+}
 
 py::ssize_t checked_ssize(std::size_t v) { return static_cast<py::ssize_t>(v); }
+
+// ---- twiddle policies -------------------------------------------------------------
+// cycles(m) returns f*m reduced modulo one cycle, where f is the frequency in cycles/sample.
+
+struct FreqTwiddle {
+    double f;
+    double cycles(std::size_t m) const noexcept {
+        return fgz::fractional_cycles(f, static_cast<double>(m));
+    }
+};
+
+// Integer bin k of an n-point DFT: k*m/n reduced modulo 1 in exact integer arithmetic.
+struct BinTwiddle {
+    std::size_t k;
+    std::size_t n;
+    double cycles(std::size_t m) const noexcept {
+        if (static_cast<double>(n) < 4294967296.0) {
+            const std::uint64_t prod =
+                static_cast<std::uint64_t>(k) * static_cast<std::uint64_t>(m % n);
+            return static_cast<double>(prod % static_cast<std::uint64_t>(n)) /
+                   static_cast<double>(n);
+        }
+        return fgz::fractional_cycles(static_cast<double>(k) / static_cast<double>(n),
+                                      static_cast<double>(m));
+    }
+};
+
+// ---- lane planning ----------------------------------------------------------------
+// m frequencies over n samples are split into m * blocks lanes (lane = frequency f, block b
+// covering samples [b*base_len, ...)). Blocks only exist to create independent chains when
+// there are fewer than `want_lanes` frequencies; every block is at least kMinBlock samples.
+
+struct Plan {
+    std::size_t n;
+    std::size_t m;
+    std::size_t blocks;
+    std::size_t base_len;
+    std::size_t lanes;
+    std::size_t items;  // groups of up to kMaxLanes lanes
+};
+
+Plan make_plan(std::size_t n, std::size_t m, std::size_t want_lanes) noexcept {
+    std::size_t blocks = 1;
+    if (m < want_lanes) {
+        blocks = (want_lanes + m - 1) / m;
+        blocks = std::min(blocks, std::max<std::size_t>(1, n / kMinBlock));
+    }
+    const std::size_t lanes = m * blocks;
+    const auto L = static_cast<std::size_t>(fgk::kMaxLanes);
+    return Plan{n, m, blocks, n / blocks, lanes, (lanes + L - 1) / L};
+}
+
+struct LaneGeom {
+    std::size_t f;
+    std::size_t offset;
+    std::size_t len;
+};
+
+LaneGeom lane_geometry(const Plan& p, std::size_t lane) noexcept {
+    const std::size_t f = lane / p.blocks;
+    const std::size_t b = lane % p.blocks;
+    const std::size_t offset = b * p.base_len;
+    const std::size_t len = (b + 1 == p.blocks) ? p.n - offset : p.base_len;
+    return LaneGeom{f, offset, len};
+}
+
+void run_item(const fgk::Api& api, const double* x, const Plan& p, const fgz::Coefficients* coeffs,
+              std::size_t item, fgz::State* states) noexcept {
+    const auto L = static_cast<std::size_t>(fgk::kMaxLanes);
+    fgk::LaneInput in[fgk::kMaxLanes];
+    int count = 0;
+    const std::size_t first = item * L;
+    const std::size_t last = std::min(first + L, p.lanes);
+    for (std::size_t lane = first; lane < last; ++lane) {
+        const LaneGeom g = lane_geometry(p, lane);
+        in[count++] = fgk::LaneInput{x + g.offset, g.len, coeffs[g.f].coeff, 0.0, 0.0};
+    }
+    api.run_lanes(in, count, states + first);
+}
+
+// X_f = sum over blocks of e^{-jw offset_b} * finish(block b). Deterministic order.
+template <class Twiddle>
+fgz::Complex combine(const Plan& p, std::size_t f, const fgz::State* states,
+                     const fgz::Coefficients& c, const Twiddle& tw) noexcept {
+    fgz::Complex X{0.0, 0.0};
+    for (std::size_t b = 0; b < p.blocks; ++b) {
+        const std::size_t lane = f * p.blocks + b;
+        const LaneGeom g = lane_geometry(p, lane);
+        fgz::Complex Xb = fgz::finish_with_cycles(states[lane], c, tw.cycles(g.len - 1));
+        if (g.offset != 0) Xb = fgz::rotate_by_cycles(Xb, tw.cycles(g.offset));
+        X.re += Xb.re;
+        X.im += Xb.im;
+    }
+    return X;
+}
+
+// One frequency, serial, all lanes used as blocks.
+template <class Twiddle>
+fgz::Complex dtft_one(const fgk::Api& api, const double* x, std::size_t n,
+                      const fgz::Coefficients& c, const Twiddle& tw) noexcept {
+    const Plan p = make_plan(n, 1, static_cast<std::size_t>(fgk::kMaxLanes));
+    fgz::State states[fgk::kMaxLanes];
+    run_item(api, x, p, &c, 0, states);
+    return combine(p, 0, states, c, tw);
+}
+
+// Several frequencies; OpenMP over lane groups when the work is large enough.
+void dtft_many(const double* x, std::size_t n, const std::vector<fgz::Coefficients>& coeffs,
+               const std::vector<FreqTwiddle>& tws, fgz::Complex* out, int threads) noexcept {
+    const fgk::Api& api = fgk::active_api();
+    const std::size_t m = coeffs.size();
+    if (m == 0) return;
+    const bool big = n * m >= kParallelThreshold;
+    const int T = big ? effective_threads(threads) : 1;
+    // The decomposition must not depend on the thread count, or results would differ in
+    // their last bits between machines and `threads=` settings. Large inputs are always cut
+    // into enough lanes for kPlanParallelism groups; OpenMP then distributes the groups.
+    const std::size_t want_lanes =
+        static_cast<std::size_t>(fgk::kMaxLanes) * (big ? kPlanParallelism : std::size_t{1});
+    const Plan p = make_plan(n, m, want_lanes);
+    std::vector<fgz::State> states(p.items * static_cast<std::size_t>(fgk::kMaxLanes));
+    const bool parallel = big && p.items > 1;
+    (void)parallel;
+    (void)T;
+
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) if (parallel) num_threads(T)
+#endif
+    for (std::ptrdiff_t item = 0; item < static_cast<std::ptrdiff_t>(p.items); ++item) {
+        run_item(api, x, p, coeffs.data(), static_cast<std::size_t>(item), states.data());
+    }
+    for (std::size_t f = 0; f < m; ++f) out[f] = combine(p, f, states.data(), coeffs[f], tws[f]);
+}
+
+std::vector<FreqTwiddle> twiddles_for(const std::vector<double>& freqs) {
+    std::vector<FreqTwiddle> out;
+    out.reserve(freqs.size());
+    for (double f : freqs) out.push_back(FreqTwiddle{f});
+    return out;
+}
+
+// ---- sliding windows --------------------------------------------------------------
+
+struct SlidingSpec {
+    std::size_t total;
+    std::size_t window;
+    std::size_t step;
+    std::size_t n_windows;
+};
+
+template <class Writer>
+void sliding_many(const double* x, const SlidingSpec& sp,
+                  const std::vector<fgz::Coefficients>& coeffs, const std::vector<double>& freqs,
+                  int threads, Writer write) noexcept {
+    const fgk::Api& api = fgk::active_api();
+    const std::size_t m = coeffs.size();
+    if (m == 0 || sp.n_windows == 0) return;
+
+    // Hop cost: `step` updates of ~8 flops against ~2*window flops for an exact window.
+    const bool use_updates = sp.step * 4 < sp.window;
+    std::vector<fgk::SlidingConsts> consts(m);
+    for (std::size_t f = 0; f < m; ++f) {
+        const fgz::Complex tail = fgz::rotate_by_cycles(
+            fgz::Complex{1.0, 0.0},
+            fgz::fractional_cycles(freqs[f], static_cast<double>(sp.window - 1)));
+        consts[f] = fgk::SlidingConsts{coeffs[f].cos_w, coeffs[f].sin_w, tail.re, tail.im};
+    }
+
+    const std::size_t R = std::min(sp.n_windows, kSlidingChunk);
+    const std::size_t n_chunks = (sp.n_windows + R - 1) / R;
+    const std::size_t items = n_chunks * m;
+    const std::size_t work = use_updates ? sp.n_windows * m * sp.step * 4 + n_chunks * m * sp.window
+                                         : sp.n_windows * m * sp.window;
+    const bool parallel = work >= kParallelThreshold && items > 1;
+    const int T = parallel ? effective_threads(threads) : 1;
+    (void)parallel;
+    (void)T;
+
+#if defined(_OPENMP)
+#pragma omp parallel for schedule(static) if (parallel) num_threads(T)
+#endif
+    for (std::ptrdiff_t it = 0; it < static_cast<std::ptrdiff_t>(items); ++it) {
+        const std::size_t f = static_cast<std::size_t>(it) / n_chunks;
+        const std::size_t chunk = static_cast<std::size_t>(it) % n_chunks;
+        const std::size_t w0 = chunk * R;
+        const std::size_t count = std::min(R, sp.n_windows - w0);
+        const FreqTwiddle tw{freqs[f]};
+        const double* start = x + w0 * sp.step;
+        const fgz::Complex y0 = dtft_one(api, start, sp.window, coeffs[f], tw);
+        if (use_updates) {
+            fgz::Complex buf[kSlidingChunk];  // count <= R <= kSlidingChunk; no heap traffic
+            api.sliding_updates(start, sp.window, sp.step, count, y0, consts[f], buf);
+            for (std::size_t w = 0; w < count; ++w) write(w0 + w, f, buf[w]);
+        } else {
+            write(w0, f, y0);
+            for (std::size_t w = 1; w < count; ++w) {
+                write(w0 + w, f, dtft_one(api, start + w * sp.step, sp.window, coeffs[f], tw));
+            }
+        }
+    }
+}
 
 // ---- one frequency ----------------------------------------------------------------
 
 fgz::Complex compute_dtft(const Array& x, double f) {
     const double* data = x.data();
     const auto n = static_cast<std::size_t>(x.shape(0));
+    const fgz::Coefficients c = fgz::coefficients(fgz::omega_from_frequency(f));
     py::gil_scoped_release release;
-    return fgz::dtft(data, n, f);
+    return dtft_one(fgk::active_api(), data, n, c, FreqTwiddle{f});
 }
 
 py::tuple goertzel(const Array& x, double frequency, const OptDouble& fs,
@@ -184,11 +395,12 @@ py::tuple goertzel_bin(const Array& x, py::ssize_t k, const std::string& scale) 
                               " for len(x) = " + std::to_string(n) + ")");
     }
     const auto kk = static_cast<std::size_t>(k);
+    const fgz::Coefficients c = fgz::coefficients(fgz::omega_from_bin(kk, n));
     const double* data = x.data();
     fgz::Complex X{};
     {
         py::gil_scoped_release release;
-        X = fgz::dft_bin(data, n, kk);
+        X = dtft_one(fgk::active_api(), data, n, c, BinTwiddle{kk, n});
     }
     const bool edge = (kk == 0) || (2 * kk == n);
     return py::make_tuple(scaled(X, n, edge, sc), fgz::phase(X));
@@ -206,25 +418,20 @@ py::array_t<double> goertzel_batch(const Array& x, const Array& frequencies, con
     const int nthreads = resolve_threads(threads);
     const std::vector<double> freqs = resolve_frequencies(frequencies, fs);
     const std::vector<fgz::Coefficients> coeffs = coefficients_for(freqs);
+    const std::vector<FreqTwiddle> tws = twiddles_for(freqs);
     const std::size_t m = freqs.size();
 
     py::array_t<double> result({checked_ssize(m), py::ssize_t{2}});
     auto out = result.mutable_unchecked<2>();
     const double* data = x.data();
-    const bool parallel = n * m >= kParallelThreshold;
-    (void)parallel;
-    (void)nthreads;
-
-    py::gil_scoped_release release;
-#if defined(_OPENMP)
-#pragma omp parallel for schedule(static) if (parallel) num_threads(omp_threads(nthreads))
-#endif
-    for (std::ptrdiff_t i = 0; i < static_cast<std::ptrdiff_t>(m); ++i) {
-        const auto idx = static_cast<std::size_t>(i);
-        const fgz::Complex X = fgz::finish_general(fgz::recurrence(data, n, coeffs[idx].coeff), n,
-                                                   coeffs[idx], freqs[idx]);
-        out(i, 0) = scaled(X, n, fgz::is_dc_or_nyquist(freqs[idx]), sc);
-        out(i, 1) = fgz::phase(X);
+    std::vector<fgz::Complex> X(m);
+    {
+        py::gil_scoped_release release;
+        dtft_many(data, n, coeffs, tws, X.data(), nthreads);
+    }
+    for (std::size_t i = 0; i < m; ++i) {
+        out(checked_ssize(i), 0) = scaled(X[i], n, fgz::is_dc_or_nyquist(freqs[i]), sc);
+        out(checked_ssize(i), 1) = fgz::phase(X[i]);
     }
     return result;
 }
@@ -239,25 +446,19 @@ py::array_t<std::complex<double>> goertzel_batch_complex(const Array& x, const A
     const int nthreads = resolve_threads(threads);
     const std::vector<double> freqs = resolve_frequencies(frequencies, fs);
     const std::vector<fgz::Coefficients> coeffs = coefficients_for(freqs);
+    const std::vector<FreqTwiddle> tws = twiddles_for(freqs);
     const std::size_t m = freqs.size();
 
     py::array_t<std::complex<double>> result(checked_ssize(m));
     auto out = result.mutable_unchecked<1>();
     const double* data = x.data();
-    const bool parallel = n * m >= kParallelThreshold;
-    (void)parallel;
-    (void)nthreads;
-
-    py::gil_scoped_release release;
-#if defined(_OPENMP)
-#pragma omp parallel for schedule(static) if (parallel) num_threads(omp_threads(nthreads))
-#endif
-    for (std::ptrdiff_t i = 0; i < static_cast<std::ptrdiff_t>(m); ++i) {
-        const auto idx = static_cast<std::size_t>(i);
-        const fgz::Complex X = fgz::finish_general(fgz::recurrence(data, n, coeffs[idx].coeff), n,
-                                                   coeffs[idx], freqs[idx]);
-        out(i) = std::complex<double>(X.re, X.im);
+    std::vector<fgz::Complex> X(m);
+    {
+        py::gil_scoped_release release;
+        dtft_many(data, n, coeffs, tws, X.data(), nthreads);
     }
+    for (std::size_t i = 0; i < m; ++i)
+        out(checked_ssize(i)) = std::complex<double>(X[i].re, X[i].im);
     return result;
 }
 
@@ -284,30 +485,21 @@ py::array_t<double> goertzel_sliding_batch(const Array& x, py::ssize_t window_si
     const std::size_t m = freqs.size();
     const auto w = static_cast<std::size_t>(window_size);
     const auto st = static_cast<std::size_t>(step);
-    const std::size_t n_windows = (total - w) / st + 1;
+    const SlidingSpec sp{total, w, st, (total - w) / st + 1};
 
     std::vector<bool> edge(m);
     for (std::size_t i = 0; i < m; ++i) edge[i] = fgz::is_dc_or_nyquist(freqs[i]);
 
-    py::array_t<double> result({checked_ssize(n_windows), checked_ssize(m), py::ssize_t{2}});
+    py::array_t<double> result({checked_ssize(sp.n_windows), checked_ssize(m), py::ssize_t{2}});
     auto out = result.mutable_unchecked<3>();
     const double* data = x.data();
-    const bool parallel = n_windows * w * m >= kParallelThreshold;
-    (void)parallel;
-    (void)nthreads;
-
-    py::gil_scoped_release release;
-#if defined(_OPENMP)
-#pragma omp parallel for schedule(static) if (parallel) num_threads(omp_threads(nthreads))
-#endif
-    for (std::ptrdiff_t wi = 0; wi < static_cast<std::ptrdiff_t>(n_windows); ++wi) {
-        const double* window = data + static_cast<std::size_t>(wi) * st;
-        for (std::size_t fi = 0; fi < m; ++fi) {
-            const fgz::Complex X = fgz::finish_general(fgz::recurrence(window, w, coeffs[fi].coeff),
-                                                       w, coeffs[fi], freqs[fi]);
-            out(wi, static_cast<py::ssize_t>(fi), 0) = scaled(X, w, edge[fi], sc);
-            out(wi, static_cast<py::ssize_t>(fi), 1) = fgz::phase(X);
-        }
+    {
+        py::gil_scoped_release release;
+        sliding_many(data, sp, coeffs, freqs, nthreads,
+                     [&](std::size_t wi, std::size_t fi, fgz::Complex Y) noexcept {
+                         out(checked_ssize(wi), checked_ssize(fi), 0) = scaled(Y, w, edge[fi], sc);
+                         out(checked_ssize(wi), checked_ssize(fi), 1) = fgz::phase(Y);
+                     });
     }
     return result;
 }
@@ -336,9 +528,7 @@ struct PyFilter {
     }
 
     fgz::Complex result_or_throw() const {
-        if (core.count() == 0) {
-            throw py::value_error("no samples have been pushed");
-        }
+        if (core.count() == 0) throw py::value_error("no samples have been pushed");
         return core.result();
     }
 
@@ -414,6 +604,12 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
             Empty or non-1-D ``x``; ``frequency`` outside its range or not finite;
             ``fs`` not positive and finite; unknown ``scale``.
 
+        Notes
+        -----
+        Single-threaded by design (predictable latency). Signals of 4096 samples or more
+        are split into up to eight independent blocks so that the recurrence's dependency
+        chain does not limit throughput; the blocks are combined exactly.
+
         Examples
         --------
         >>> import numpy as np, fastgoertzel
@@ -438,9 +634,10 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
           R"pbdoc(
         Amplitude and phase of DFT bin ``k`` of ``x`` (``k`` in ``[0, len(x))``).
 
-        Equivalent to ``goertzel(x, k / len(x))`` but uses the integer-bin form of the
-        final step, exactly as ``numpy.fft.fft(x)[k]``. This is what versions 1.x
-        computed for every call after truncating ``frequency * len(x)`` to an integer.
+        Equivalent to ``goertzel(x, k / len(x))`` but with the twiddles computed in exact
+        integer arithmetic, so it matches ``numpy.fft.fft(x)[k]`` as closely as the
+        recurrence allows. This is what versions 1.x computed for every call after
+        truncating ``frequency * len(x)`` to an integer.
         )pbdoc");
 
     m.def("goertzel_batch", &goertzel_batch, py::arg("x"), py::arg("frequencies"), py::kw_only(),
@@ -461,7 +658,7 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
         threads : int, optional
             OpenMP thread count for this call. ``None`` uses the OpenMP default
             (``OMP_NUM_THREADS``); ``1`` forces serial execution. Ignored in builds
-            without OpenMP.
+            without OpenMP. Results do not depend on the thread count.
 
         Returns
         -------
@@ -471,7 +668,9 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
 
         Notes
         -----
-        The parallel region is entered only when ``len(x) * len(frequencies) >= 65536``.
+        Up to eight frequencies share one pass over the signal; fewer frequencies are
+        padded with signal blocks so that eight independent chains always run. The
+        parallel region is entered only when ``len(x) * len(frequencies) >= 65536``.
         The GIL is released during computation.
         )pbdoc");
 
@@ -510,9 +709,12 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
 
         Notes
         -----
-        Each window is evaluated from scratch (cost ``window_size`` per window and
-        frequency). Windows are distributed over OpenMP threads when the total work is at
-        least 65536 sample-frequency products. The GIL is released.
+        When ``4 * step < window_size`` consecutive windows are obtained with the sliding
+        DFT update, which costs a constant amount per hop regardless of ``window_size``;
+        every 256 windows the value is recomputed exactly, so rounding error cannot
+        accumulate. Otherwise each window is computed from scratch. Work is distributed
+        over OpenMP threads by (frequency, 256-window chunk); results do not depend on the
+        thread count. The GIL is released.
         )pbdoc");
 
     py::class_<PyFilter>(m, "GoertzelFilter",
@@ -572,4 +774,5 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
 #else
     m.attr("_has_openmp") = false;
 #endif
+    m.attr("_kernel") = fgk::active_api().name;
 }

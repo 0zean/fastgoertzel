@@ -86,9 +86,31 @@ if(FASTGOERTZEL_BUILD_PYTHON)
   find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
   find_package(pybind11 CONFIG REQUIRED)
 
-  pybind11_add_module(_core MODULE cpp/bindings.cpp)
+  # Hot loops are compiled twice: a baseline TU and, on x86, an AVX2+FMA TU selected at
+  # runtime (cpp/kernels.cpp). The two must stay separate objects, so link-time optimisation
+  # is off for this module (NO_EXTRAS); LTO could otherwise inline one into the other.
+  set(_fg_sources cpp/bindings.cpp cpp/kernels.cpp cpp/kernels_baseline.cpp)
+  set(_fg_arch "${CMAKE_SYSTEM_PROCESSOR}")
+  if(CMAKE_OSX_ARCHITECTURES)
+    set(_fg_arch "${CMAKE_OSX_ARCHITECTURES}")
+  endif()
+  set(FASTGOERTZEL_HAVE_AVX2_TU OFF)
+  if(_fg_arch MATCHES "^(x86_64|AMD64|amd64|i[3-6]86|x86|X86)$")
+    set(FASTGOERTZEL_HAVE_AVX2_TU ON)
+    list(APPEND _fg_sources cpp/kernels_avx2.cpp)
+    if(MSVC)
+      set_source_files_properties(cpp/kernels_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+    else()
+      set_source_files_properties(cpp/kernels_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+    endif()
+  endif()
+
+  pybind11_add_module(_core MODULE NO_EXTRAS ${_fg_sources})
   target_link_libraries(_core PRIVATE fastgoertzel::core fastgoertzel_flags)
   target_compile_definitions(_core PRIVATE VERSION_INFO=${FASTGOERTZEL_VERSION})
+  if(FASTGOERTZEL_HAVE_AVX2_TU)
+    target_compile_definitions(_core PRIVATE FASTGOERTZEL_HAVE_AVX2_TU=1)
+  endif()
   if(FASTGOERTZEL_HAVE_OPENMP)
     target_link_libraries(_core PRIVATE OpenMP::OpenMP_CXX)
   endif()
@@ -106,4 +128,5 @@ if(FASTGOERTZEL_BUILD_BENCHMARKS)
 endif()
 
 message(STATUS "fastgoertzel ${FASTGOERTZEL_VERSION}: OpenMP=${FASTGOERTZEL_HAVE_OPENMP} "
-               "native=${FASTGOERTZEL_NATIVE} werror=${FASTGOERTZEL_WERROR}")
+               "avx2_tu=${FASTGOERTZEL_HAVE_AVX2_TU} native=${FASTGOERTZEL_NATIVE} "
+               "werror=${FASTGOERTZEL_WERROR}")
