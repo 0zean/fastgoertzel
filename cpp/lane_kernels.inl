@@ -18,14 +18,14 @@ using fastgoertzel::kernels::SlidingConsts;
 // L independent recurrences advanced in lockstep: L dependency chains interleave, so the
 // FMA units are kept busy instead of waiting ~4 cycles per sample on one chain. Lanes may
 // have different lengths; the common prefix runs in lockstep and the tails run alone.
-template <int L>
+template <std::size_t L>
 void run_lanes_t(const LaneInput* lanes, State* out) noexcept {
     double s1[L];
     double s2[L];
     double cf[L];
     const double* xp[L];
     std::size_t common = lanes[0].len;
-    for (int l = 0; l < L; ++l) {
+    for (std::size_t l = 0; l < L; ++l) {
         s1[l] = lanes[l].s1;
         s2[l] = lanes[l].s2;
         cf[l] = lanes[l].coeff;
@@ -33,14 +33,14 @@ void run_lanes_t(const LaneInput* lanes, State* out) noexcept {
         if (lanes[l].len < common) common = lanes[l].len;
     }
     for (std::size_t i = 0; i < common; ++i) {
-        for (int l = 0; l < L; ++l) {
+        for (std::size_t l = 0; l < L; ++l) {
             const double t = xp[l][i] - s2[l];
             const double s0 = cf[l] * s1[l] + t;
             s2[l] = s1[l];
             s1[l] = s0;
         }
     }
-    for (int l = 0; l < L; ++l) {
+    for (std::size_t l = 0; l < L; ++l) {
         double a = s1[l];
         double b = s2[l];
         const double c = cf[l];
