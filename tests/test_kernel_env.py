@@ -10,8 +10,6 @@ import sys
 
 import pytest
 
-import fastgoertzel._core as core
-
 PROBE = "import fastgoertzel._core as c; print(c._kernel)"
 
 
@@ -45,10 +43,14 @@ def test_unknown_value_fails_the_import(value):
 
 
 def test_forced_avx2_is_checked_against_the_cpu():
+    # Judge by what a child process selects on its own, not by this process: under qemu-user
+    # (the release workflow's pre-AVX check) the parent is emulated as a Nehalem while the
+    # children it spawns run natively on the host CPU.
+    auto = run(None).stdout.strip()
     r = run("avx2")
-    if core._kernel == "avx2":  # this machine can run it, so forcing it is fine
+    if auto == "avx2":  # the child's machine can run it, so forcing it is fine
         assert r.returncode == 0, r.stderr
         assert r.stdout.strip() == "avx2"
-    else:  # no AVX2 here (or a non-x86 build): must refuse, not crash later
+    else:  # no AVX2 there (or a non-x86 build): must refuse, not crash later
         assert r.returncode != 0
         assert "FASTGOERTZEL_KERNEL=avx2 requested" in r.stderr
