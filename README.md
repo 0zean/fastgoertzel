@@ -116,54 +116,54 @@ Measured with `python benchmarks/benchmark.py` on Intel(R) Core(TM) i9-14900KF (
 
 | N | fastgoertzel | pure-Python loop | NumPy 2x real dot | `np.fft.rfft`, one bin |
 |---:|---:|---:|---:|---:|
-| 100 | 0.6 us | 2.9 us (5.2x) | 3.1 us (5.5x) | 4.0 us (7.2x) |
-| 1,000 | 1.7 us | 22.7 us (13.6x) | 10.0 us (6.0x) | 7.0 us (4.2x) |
-| 10,000 | 4.3 us | 230.5 us (53.1x) | 76.5 us (17.6x) | 41.0 us (9.4x) |
-| 100,000 | 38.4 us | 2.40 ms (62.5x) | 932.6 us (24.3x) | 451.8 us (11.8x) |
-| 1,000,000 | 388.4 us | 24.45 ms (62.9x) | 10.55 ms (27.2x) | 8.53 ms (21.9x) |
-| 10,000,000 | 4.32 ms | not run | 119.00 ms (27.5x) | 152.66 ms (35.3x) |
+| 100 | 0.6 us | 2.6 us (4.5x) | 3.0 us (5.2x) | 4.1 us (7.0x) |
+| 1,000 | 1.7 us | 23.5 us (14.2x) | 10.0 us (6.0x) | 7.1 us (4.3x) |
+| 10,000 | 4.4 us | 247.2 us (56.7x) | 77.1 us (17.7x) | 38.9 us (8.9x) |
+| 100,000 | 37.6 us | 2.24 ms (59.7x) | 892.9 us (23.8x) | 422.2 us (11.2x) |
+| 1,000,000 | 370.5 us | 24.87 ms (67.1x) | 10.37 ms (28.0x) | 8.30 ms (22.4x) |
+| 10,000,000 | 3.86 ms | not run | 114.42 ms (29.6x) | 122.00 ms (31.6x) |
 
 **Several frequencies**, `goertzel_batch(x, freqs)` (OpenMP default threads):
 
 | N | M | fastgoertzel | M x `goertzel` | `np.fft.rfft` (all bins) | M x NumPy dot |
 |---:|---:|---:|---:|---:|---:|
-| 1,000 | 8 | 4.2 us | 14.0 us (3.4x) | 6.1 us (1.5x) | 91.3 us (22.0x) |
-| 100,000 | 8 | 36.0 us | 308.0 us (8.6x) | 432.2 us (12.0x) | 7.39 ms (205.6x) |
-| 1,000,000 | 8 | 243.7 us | 3.05 ms (12.5x) | 8.25 ms (33.9x) | 84.68 ms (347.5x) |
-| 1,000,000 | 64 | 1.67 ms | 24.51 ms (14.7x) | 9.89 ms (5.9x) | 631.05 ms (378.1x) |
-| 10,000,000 | 8 | 2.55 ms | 32.66 ms (12.8x) | 146.18 ms (57.3x) | 993.77 ms (389.3x) |
+| 1,000 | 8 | 4.1 us | 13.5 us (3.3x) | 6.1 us (1.5x) | 90.4 us (22.3x) |
+| 100,000 | 8 | 35.6 us | 304.4 us (8.5x) | 424.6 us (11.9x) | 7.28 ms (204.3x) |
+| 1,000,000 | 8 | 243.4 us | 2.99 ms (12.3x) | 8.23 ms (33.8x) | 83.19 ms (341.8x) |
+| 1,000,000 | 64 | 1.72 ms | 23.78 ms (13.8x) | 9.49 ms (5.5x) | 615.17 ms (357.8x) |
+| 10,000,000 | 8 | 2.62 ms | 31.37 ms (12.0x) | 119.19 ms (45.6x) | 976.53 ms (373.4x) |
 
 **Sliding windows**, `goertzel_sliding_batch(x, W, freqs)` (OpenMP default threads):
 
 | N | W | M | fastgoertzel | NumPy `sliding_window_view` + `rfft` |
 |---:|---:|---:|---:|---:|
-| 10,000 | 256 | 8 | 87.1 us | 7.98 ms (91.6x) |
-| 10,000 | 256 | 64 | 2.79 ms | 18.99 ms (6.8x) |
-| 100,000 | 256 | 8 | 2.28 ms | 88.76 ms (39.0x) |
-| 100,000 | 1024 | 8 | 2.26 ms | 312.32 ms (137.9x) |
+| 10,000 | 256 | 8 | 88.9 us | 7.64 ms (85.9x) |
+| 10,000 | 256 | 64 | 2.86 ms | 19.51 ms (6.8x) |
+| 100,000 | 256 | 8 | 2.29 ms | 85.79 ms (37.4x) |
+| 100,000 | 1024 | 8 | 2.29 ms | 300.99 ms (131.4x) |
 
 **OpenMP scaling**, batch N = 1e6, M = 32 and sliding N = 1e5, W = 256, M = 8:
 
 | OMP_NUM_THREADS | batch | sliding |
 |---:|---:|---:|
-| 1 | 12.02 ms | 11.42 ms |
-| 2 | 6.08 ms | 7.39 ms |
-| 4 | 3.14 ms | 5.28 ms |
-| 8 | 1.72 ms | 3.79 ms |
-| 16 | 1.25 ms | 2.53 ms |
-| default | 937.6 us | 2.38 ms |
+| 1 | 11.88 ms | 11.34 ms |
+| 2 | 6.03 ms | 7.39 ms |
+| 4 | 3.16 ms | 5.42 ms |
+| 8 | 1.73 ms | 3.67 ms |
+| 16 | 1.30 ms | 2.52 ms |
+| default | 956.4 us | 2.37 ms |
 
 **Per-call latency**, 100,000 calls each, Python overhead included:
 
 | Call | p50 | p90 | p99 | p99.9 | max |
 |---|---:|---:|---:|---:|---:|
-| goertzel        N=64 | 0.5 us | 0.6 us | 1.1 us | 2.4 us | 114 us |
-| goertzel        N=256 | 0.8 us | 0.8 us | 1.4 us | 3.9 us | 385 us |
-| goertzel        N=1024 | 0.9 us | 1.0 us | 1.6 us | 5.1 us | 733 us |
-| goertzel        N=4096 | 2.2 us | 2.2 us | 3.4 us | 17.3 us | 464 us |
-| batch           N=256    M=8 (serial) | 2.0 us | 2.2 us | 3.3 us | 12.8 us | 200 us |
-| batch           N=65536  M=8 (OpenMP) | 24.7 us | 31.9 us | 73.6 us | 305.3 us | 363 us |
-| sliding         N=1024 W=256 M=4 | 35.9 us | 37.3 us | 73.7 us | 146.9 us | 752 us |
-| np.fft.rfft     N=256 (reference) | 3.5 us | 3.9 us | 5.6 us | 36.7 us | 324 us |
-| NumPy 2x dot    N=256 (reference) | 4.8 us | 5.1 us | 7.4 us | 44.1 us | 388 us |
+| goertzel        N=64 | 0.6 us | 0.6 us | 1.1 us | 3.0 us | 253 us |
+| goertzel        N=256 | 0.8 us | 0.8 us | 1.4 us | 5.0 us | 286 us |
+| goertzel        N=1024 | 0.9 us | 1.0 us | 1.6 us | 5.3 us | 126 us |
+| goertzel        N=4096 | 2.1 us | 2.2 us | 3.4 us | 15.0 us | 216 us |
+| batch           N=256    M=8 (serial) | 2.0 us | 2.1 us | 3.2 us | 10.7 us | 255 us |
+| batch           N=65536  M=8 (OpenMP) | 25.4 us | 33.1 us | 52.8 us | 97.8 us | 333 us |
+| sliding         N=1024 W=256 M=4 | 35.2 us | 37.0 us | 55.5 us | 106.8 us | 331 us |
+| np.fft.rfft     N=256 (reference) | 3.6 us | 4.1 us | 9.3 us | 33.4 us | 2287 us |
+| NumPy 2x dot    N=256 (reference) | 4.6 us | 4.9 us | 5.2 us | 19.7 us | 152 us |
 <!-- benchmark-tables:end -->
