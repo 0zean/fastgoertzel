@@ -21,10 +21,12 @@
 #include <pybind11/stl.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <vector>
@@ -80,6 +82,14 @@ double scaled(fgz::Complex X, std::size_t n, bool dc_or_nyquist, Scale scale) no
 
 // ---- validation -------------------------------------------------------------------
 
+// Decimal text for messages; std::to_string prints six fixed decimals and turns 1e-9 into
+// "0.000000".
+std::string num(double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.15g", v);
+    return buf;
+}
+
 void require_1d(const Array& a, const char* name) {
     if (a.ndim() != 1) {
         throw py::value_error(std::string(name) + " must be a 1-dimensional array, got " +
@@ -93,24 +103,22 @@ void require_nonempty(std::size_t n, const char* name) {
 
 void require_fs(const OptDouble& fs) {
     if (fs && !(std::isfinite(*fs) && *fs > 0.0)) {
-        throw py::value_error("fs must be a positive finite number (got " + std::to_string(*fs) +
-                              ")");
+        throw py::value_error("fs must be a positive finite number (got " + num(*fs) + ")");
     }
 }
 
 // Hz (when fs is given) or cycles/sample -> validated cycles/sample.
 double resolve_frequency(double frequency, const OptDouble& fs) {
     if (!std::isfinite(frequency)) {
-        throw py::value_error("frequency must be finite (got " + std::to_string(frequency) + ")");
+        throw py::value_error("frequency must be finite (got " + num(frequency) + ")");
     }
     const double f = fs ? frequency / *fs : frequency;
     if (!fgz::is_valid_frequency(f)) {
         if (fs) {
-            throw py::value_error("frequency must be in [0, fs) (got " + std::to_string(frequency) +
-                                  " with fs = " + std::to_string(*fs) + ")");
+            throw py::value_error("frequency must be in [0, fs) (got " + num(frequency) +
+                                  " with fs = " + num(*fs) + ")");
         }
-        throw py::value_error("frequency must be in [0, 1) (got " + std::to_string(frequency) +
-                              ")");
+        throw py::value_error("frequency must be in [0, 1) (got " + num(frequency) + ")");
     }
     return f;
 }
@@ -151,6 +159,51 @@ int effective_threads(int requested) noexcept {
 }
 
 py::ssize_t checked_ssize(std::size_t v) { return static_cast<py::ssize_t>(v); }
+
+// ---- preallocated output ----------------------------------------------------------
+
+template <typename It>
+std::string shape_string(It first, It last) {
+    std::string s = "(";
+    for (It it = first; it != last; ++it) {
+        if (it != first) s += ", ";
+        s += std::to_string(*it);
+    }
+    return s + (last - first == 1 ? ",)" : ")");
+}
+
+// A fresh array of `shape`, or the caller's `out`, which must match exactly: the kernels
+// write straight into it, so there is no casting, no copying, and no allocation. Overlap
+// with `x` is rejected because the kernels read `x` while writing the output.
+template <typename T, std::size_t Dim>
+py::array_t<T> resolve_out(const py::object& out, const std::array<py::ssize_t, Dim>& shape,
+                           const char* dtype_name, const Array& x) {
+    if (out.is_none()) {
+        return py::array_t<T>(std::vector<py::ssize_t>(shape.begin(), shape.end()));
+    }
+    if (!py::isinstance<py::array>(out)) {
+        throw py::type_error("out must be a numpy.ndarray or None");
+    }
+    const auto arr = py::reinterpret_borrow<py::array>(out);
+    bool ok = py::isinstance<py::array_t<T, py::array::c_style>>(out) && arr.writeable() &&
+              static_cast<std::size_t>(arr.ndim()) == Dim;
+    for (std::size_t d = 0; ok && d < Dim; ++d) ok = arr.shape(checked_ssize(d)) == shape[d];
+    if (!ok) {
+        throw py::value_error(std::string("out must be a writeable C-contiguous ") + dtype_name +
+                              " array of shape " + shape_string(shape.begin(), shape.end()) +
+                              " (got dtype " + std::string(py::str(arr.dtype())) + ", shape " +
+                              shape_string(arr.shape(), arr.shape() + arr.ndim()) +
+                              (arr.writeable() ? "" : ", read-only") +
+                              ((arr.flags() & py::array::c_style) ? "" : ", not C-contiguous") +
+                              ")");
+    }
+    const auto* ob = static_cast<const char*>(arr.data());
+    const auto* xb = reinterpret_cast<const char*>(x.data());
+    if (ob < xb + x.nbytes() && xb < ob + arr.nbytes()) {
+        throw py::value_error("out must not share memory with x");
+    }
+    return py::reinterpret_borrow<py::array_t<T>>(out);
+}
 
 // ---- twiddle policies -------------------------------------------------------------
 // cycles(m) returns f*m reduced modulo one cycle, where f is the frequency in cycles/sample.
@@ -409,7 +462,8 @@ py::tuple goertzel_bin(const Array& x, py::ssize_t k, const std::string& scale) 
 // ---- several frequencies ----------------------------------------------------------
 
 py::array_t<double> goertzel_batch(const Array& x, const Array& frequencies, const OptDouble& fs,
-                                   const std::string& scale, const OptInt& threads) {
+                                   const std::string& scale, const OptInt& threads,
+                                   const py::object& out) {
     require_1d(x, "x");
     const auto n = static_cast<std::size_t>(x.shape(0));
     require_nonempty(n, "x");
@@ -421,8 +475,8 @@ py::array_t<double> goertzel_batch(const Array& x, const Array& frequencies, con
     const std::vector<FreqTwiddle> tws = twiddles_for(freqs);
     const std::size_t m = freqs.size();
 
-    py::array_t<double> result({checked_ssize(m), py::ssize_t{2}});
-    auto out = result.mutable_unchecked<2>();
+    py::array_t<double> result = resolve_out<double, 2>(out, {checked_ssize(m), 2}, "float64", x);
+    auto dst = result.mutable_unchecked<2>();
     const double* data = x.data();
     std::vector<fgz::Complex> X(m);
     {
@@ -430,15 +484,15 @@ py::array_t<double> goertzel_batch(const Array& x, const Array& frequencies, con
         dtft_many(data, n, coeffs, tws, X.data(), nthreads);
     }
     for (std::size_t i = 0; i < m; ++i) {
-        out(checked_ssize(i), 0) = scaled(X[i], n, fgz::is_dc_or_nyquist(freqs[i]), sc);
-        out(checked_ssize(i), 1) = fgz::phase(X[i]);
+        dst(checked_ssize(i), 0) = scaled(X[i], n, fgz::is_dc_or_nyquist(freqs[i]), sc);
+        dst(checked_ssize(i), 1) = fgz::phase(X[i]);
     }
     return result;
 }
 
 py::array_t<std::complex<double>> goertzel_batch_complex(const Array& x, const Array& frequencies,
-                                                         const OptDouble& fs,
-                                                         const OptInt& threads) {
+                                                         const OptDouble& fs, const OptInt& threads,
+                                                         const py::object& out) {
     require_1d(x, "x");
     const auto n = static_cast<std::size_t>(x.shape(0));
     require_nonempty(n, "x");
@@ -449,8 +503,9 @@ py::array_t<std::complex<double>> goertzel_batch_complex(const Array& x, const A
     const std::vector<FreqTwiddle> tws = twiddles_for(freqs);
     const std::size_t m = freqs.size();
 
-    py::array_t<std::complex<double>> result(checked_ssize(m));
-    auto out = result.mutable_unchecked<1>();
+    py::array_t<std::complex<double>> result =
+        resolve_out<std::complex<double>, 1>(out, {checked_ssize(m)}, "complex128", x);
+    auto dst = result.mutable_unchecked<1>();
     const double* data = x.data();
     std::vector<fgz::Complex> X(m);
     {
@@ -458,14 +513,14 @@ py::array_t<std::complex<double>> goertzel_batch_complex(const Array& x, const A
         dtft_many(data, n, coeffs, tws, X.data(), nthreads);
     }
     for (std::size_t i = 0; i < m; ++i)
-        out(checked_ssize(i)) = std::complex<double>(X[i].re, X[i].im);
+        dst(checked_ssize(i)) = std::complex<double>(X[i].re, X[i].im);
     return result;
 }
 
 py::array_t<double> goertzel_sliding_batch(const Array& x, py::ssize_t window_size,
                                            const Array& frequencies, py::ssize_t step,
                                            const OptDouble& fs, const std::string& scale,
-                                           const OptInt& threads) {
+                                           const OptInt& threads, const py::object& out) {
     require_1d(x, "x");
     const auto total = static_cast<std::size_t>(x.shape(0));
     require_nonempty(total, "x");
@@ -490,15 +545,16 @@ py::array_t<double> goertzel_sliding_batch(const Array& x, py::ssize_t window_si
     std::vector<bool> edge(m);
     for (std::size_t i = 0; i < m; ++i) edge[i] = fgz::is_dc_or_nyquist(freqs[i]);
 
-    py::array_t<double> result({checked_ssize(sp.n_windows), checked_ssize(m), py::ssize_t{2}});
-    auto out = result.mutable_unchecked<3>();
+    py::array_t<double> result = resolve_out<double, 3>(
+        out, {checked_ssize(sp.n_windows), checked_ssize(m), 2}, "float64", x);
+    auto dst = result.mutable_unchecked<3>();
     const double* data = x.data();
     {
         py::gil_scoped_release release;
         sliding_many(data, sp, coeffs, freqs, nthreads,
                      [&](std::size_t wi, std::size_t fi, fgz::Complex Y) noexcept {
-                         out(checked_ssize(wi), checked_ssize(fi), 0) = scaled(Y, w, edge[fi], sc);
-                         out(checked_ssize(wi), checked_ssize(fi), 1) = fgz::phase(Y);
+                         dst(checked_ssize(wi), checked_ssize(fi), 0) = scaled(Y, w, edge[fi], sc);
+                         dst(checked_ssize(wi), checked_ssize(fi), 1) = fgz::phase(Y);
                      });
     }
     return result;
@@ -506,7 +562,7 @@ py::array_t<double> goertzel_sliding_batch(const Array& x, py::ssize_t window_si
 
 py::array_t<std::complex<double>> goertzel_sliding_batch_complex(
     const Array& x, py::ssize_t window_size, const Array& frequencies, py::ssize_t step,
-    const OptDouble& fs, const OptInt& threads) {
+    const OptDouble& fs, const OptInt& threads, const py::object& out) {
     require_1d(x, "x");
     const auto total = static_cast<std::size_t>(x.shape(0));
     require_nonempty(total, "x");
@@ -527,14 +583,15 @@ py::array_t<std::complex<double>> goertzel_sliding_batch_complex(
     const auto st = static_cast<std::size_t>(step);
     const SlidingSpec sp{total, w, st, (total - w) / st + 1};
 
-    py::array_t<std::complex<double>> result({checked_ssize(sp.n_windows), checked_ssize(m)});
-    auto out = result.mutable_unchecked<2>();
+    py::array_t<std::complex<double>> result = resolve_out<std::complex<double>, 2>(
+        out, {checked_ssize(sp.n_windows), checked_ssize(m)}, "complex128", x);
+    auto dst = result.mutable_unchecked<2>();
     const double* data = x.data();
     {
         py::gil_scoped_release release;
         sliding_many(data, sp, coeffs, freqs, nthreads,
                      [&](std::size_t wi, std::size_t fi, fgz::Complex Y) noexcept {
-                         out(checked_ssize(wi), checked_ssize(fi)) =
+                         dst(checked_ssize(wi), checked_ssize(fi)) =
                              std::complex<double>(Y.re, Y.im);
                      });
     }
@@ -642,9 +699,10 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
 
         Notes
         -----
-        Single-threaded by design (predictable latency). Signals of 4096 samples or more
-        are split into up to eight independent blocks so that the recurrence's dependency
-        chain does not limit throughput; the blocks are combined exactly.
+        Single-threaded by design (predictable latency). Signals of 1024 samples or more
+        are split into independent blocks of at least 512 samples (up to eight) so that
+        the recurrence's dependency chain does not limit throughput; the blocks are
+        combined exactly.
 
         Examples
         --------
@@ -678,7 +736,7 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
 
     m.def("goertzel_batch", &goertzel_batch, py::arg("x"), py::arg("frequencies"), py::kw_only(),
           py::arg("fs") = py::none(), py::arg("scale") = "amplitude",
-          py::arg("threads") = py::none(),
+          py::arg("threads") = py::none(), py::arg("out") = py::none(),
           R"pbdoc(
         :func:`goertzel` for every entry of ``frequencies`` in one call.
 
@@ -695,31 +753,39 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
             OpenMP thread count for this call. ``None`` uses the OpenMP default
             (``OMP_NUM_THREADS``); ``1`` forces serial execution. Ignored in builds
             without OpenMP. Results do not depend on the thread count.
+        out : numpy.ndarray, optional
+            Preallocated result array: float64, C-contiguous, writeable, shape
+            ``(len(frequencies), 2)``, not sharing memory with ``x``. The call then
+            allocates nothing and returns ``out``.
 
         Returns
         -------
         numpy.ndarray
             Shape ``(len(frequencies), 2)``: column 0 is the scaled value, column 1 the
-            phase. Row ``i`` equals ``goertzel(x, frequencies[i], ...)``.
+            phase. Row ``i`` is ``goertzel(x, frequencies[i], ...)`` up to rounding.
 
         Notes
         -----
         Up to eight frequencies share one pass over the signal; fewer frequencies are
-        padded with signal blocks so that eight independent chains always run. The
-        parallel region is entered only when ``len(x) * len(frequencies) >= 65536``.
+        padded with signal blocks of at least 512 samples so that up to eight independent
+        chains run, and large batches use more lanes still. The parallel region is
+        entered only when ``len(x) * len(frequencies) >= 65536``.
         The GIL is released during computation.
         )pbdoc");
 
     m.def("goertzel_batch_complex", &goertzel_batch_complex, py::arg("x"), py::arg("frequencies"),
           py::kw_only(), py::arg("fs") = py::none(), py::arg("threads") = py::none(),
+          py::arg("out") = py::none(),
           R"pbdoc(
         :func:`goertzel_complex` for every entry of ``frequencies``; returns a complex128
-        array of shape ``(len(frequencies),)``.
+        array of shape ``(len(frequencies),)``. ``out`` may be a preallocated complex128
+        array of that shape, as in :func:`goertzel_batch`.
         )pbdoc");
 
     m.def("goertzel_sliding_batch", &goertzel_sliding_batch, py::arg("x"), py::arg("window_size"),
           py::arg("frequencies"), py::kw_only(), py::arg("step") = 1, py::arg("fs") = py::none(),
           py::arg("scale") = "amplitude", py::arg("threads") = py::none(),
+          py::arg("out") = py::none(),
           R"pbdoc(
         :func:`goertzel_batch` over sliding windows of ``x``.
 
@@ -737,6 +803,10 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
             ``(len(x) - window_size) // step + 1`` windows.
         fs, scale, threads
             As in :func:`goertzel_batch`.
+        out : numpy.ndarray, optional
+            Preallocated result array: float64, C-contiguous, writeable, shape
+            ``(n_windows, len(frequencies), 2)``, not sharing memory with ``x``. With a
+            reused ``out`` the call allocates nothing; see Notes.
 
         Returns
         -------
@@ -751,16 +821,21 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
         accumulate. Otherwise each window is computed from scratch. Work is distributed
         over OpenMP threads by (frequency, 256-window chunk); results do not depend on the
         thread count. The GIL is released.
+
+        The result array is large (``n_windows * len(frequencies) * 16`` bytes) and, when
+        freshly allocated, is page-faulted in by the writing threads, which serialises in
+        the kernel and bounds the thread scaling. In a loop that calls this repeatedly,
+        pass the same ``out`` each time.
         )pbdoc");
 
     m.def("goertzel_sliding_batch_complex", &goertzel_sliding_batch_complex, py::arg("x"),
           py::arg("window_size"), py::arg("frequencies"), py::kw_only(), py::arg("step") = 1,
-          py::arg("fs") = py::none(), py::arg("threads") = py::none(),
+          py::arg("fs") = py::none(), py::arg("threads") = py::none(), py::arg("out") = py::none(),
           R"pbdoc(
         :func:`goertzel_sliding_batch` returning the unscaled complex DTFT of every window.
 
         Same arguments as :func:`goertzel_sliding_batch` without ``scale``. Returns a
-        complex128 array of shape ``(n_windows, len(frequencies))``. Skips the ``sqrt`` and
+        complex128 array of shape ``(n_windows, len(frequencies))``, or ``out`` if given. Skips the ``sqrt`` and
         ``atan2`` per window, which dominate the cost of the (value, phase) form once the
         sliding update has made the window length irrelevant.
         )pbdoc");
@@ -770,8 +845,8 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
         Stateful Goertzel filter for streaming input.
 
         Create it for one frequency, ``push`` samples as they arrive (scalars or arrays,
-        any chunking), and read ``result()`` at any time; it equals ``goertzel`` applied
-        to everything pushed so far. ``reset()`` clears the state. Instances are cheap and
+        any chunking), and read ``result()`` at any time; it is ``goertzel`` applied to
+        everything pushed so far (equal to rounding). ``reset()`` clears the state. Instances are cheap and
         hold no buffers. Do not ``push`` to the same instance from two threads at once.
 
         Examples
@@ -807,8 +882,8 @@ PYBIND11_MODULE(_core, m, py::mod_gil_not_used()) {
             "normalized_frequency", [](const PyFilter& self) { return self.core.frequency(); },
             "Frequency in cycles per sample.")
         .def("__repr__", [](const PyFilter& self) {
-            std::string r = "GoertzelFilter(frequency=" + std::to_string(self.frequency_as_given);
-            if (self.fs) r += ", fs=" + std::to_string(*self.fs);
+            std::string r = "GoertzelFilter(frequency=" + num(self.frequency_as_given);
+            if (self.fs) r += ", fs=" + num(*self.fs);
             return r + ", n_samples=" + std::to_string(self.core.count()) + ")";
         });
 

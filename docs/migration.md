@@ -15,7 +15,7 @@ the DTFT at exactly the frequency you pass.
 |---|---|---|
 | `goertzel(x, k / len(x))` with the product an exact integer | unchanged | nothing |
 | `goertzel(x, f)` with `f * len(x)` not an integer | the true value at `f`, no longer bin `floor(f * N)` | nothing, unless you relied on the rounding |
-| code that relied on the rounding to a bin | different value | call `goertzel_bin(x, k)` with the integer bin; it is identical to `numpy.fft.fft(x)[k]` |
+| code that relied on the rounding to a bin | different value | call `goertzel_bin(x, k)` with the integer bin; it is the same quantity as `numpy.fft.fft(x)[k]` |
 | `goertzel(x, 0)` or `goertzel(x, 0.5)` | half the 1.x value | 1.x reported twice the true amplitude at DC and Nyquist; 2.0 reports the sinusoid's amplitude. Use `scale="magnitude"` for raw `abs(X)`. |
 
 ## Signature changes
@@ -49,7 +49,7 @@ no longer a reason to build from source for speed on x86-64.
 ## Numerical differences
 
 Where 1.x and 2.0 compute the same quantity (exact-bin frequencies away from DC and
-Nyquist), results agree to about 1e-12 relative. 2.0 splits long signals into blocks and
+Nyquist), results agree to rounding. 2.0 splits long signals into blocks and
 uses a different recurrence formulation, so the last bits differ; both are closer to the
 exact sum than 1.x was for long signals, because the block split shortens the error
 growth of the recurrence.

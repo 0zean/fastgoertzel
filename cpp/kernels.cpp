@@ -8,8 +8,10 @@
 
 #include "kernels_api.hpp"
 
+#include <cctype>
 #include <cstdlib>
-#include <cstring>
+#include <stdexcept>
+#include <string>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -47,25 +49,51 @@ bool cpu_has_avx2_fma() noexcept {
 #endif
 }
 
-const Api* select() noexcept {
+std::string lowercase(const char* s) {
+    std::string out(s);
+    for (char& c : out) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return out;
+}
+
+// FASTGOERTZEL_KERNEL=auto|baseline|avx2 (case-insensitive; unset or empty means auto).
+// A value that is not one of these, or avx2 on a machine that cannot run it, is an error
+// rather than a silent fallback: this is a tuning knob, and a typo must not go unnoticed,
+// while an unconditional avx2 would die with an illegal-instruction signal later.
+const Api* select() {
     const char* env = std::getenv("FASTGOERTZEL_KERNEL");
-    const bool force_baseline = env != nullptr && std::strcmp(env, "baseline") == 0;
-    const bool force_avx2 = env != nullptr && std::strcmp(env, "avx2") == 0;
+    const std::string mode = (env == nullptr || *env == '\0') ? "auto" : lowercase(env);
+    if (mode != "auto" && mode != "baseline" && mode != "avx2") {
+        throw std::runtime_error("FASTGOERTZEL_KERNEL must be 'auto', 'baseline' or 'avx2' (got '" +
+                                 std::string(env) + "')");
+    }
+    const bool have_avx2 = cpu_has_avx2_fma();
 #if defined(FASTGOERTZEL_HAVE_AVX2_TU)
-    if (force_avx2) return &arch::avx2::api;
-    if (!force_baseline && cpu_has_avx2_fma()) return &arch::avx2::api;
+    if (mode == "avx2") {
+        if (!have_avx2) {
+            throw std::runtime_error(
+                "FASTGOERTZEL_KERNEL=avx2 requested, but this CPU or operating system does not "
+                "support AVX2 and FMA");
+        }
+        return &arch::avx2::api;
+    }
+    if (mode == "auto" && have_avx2) return &arch::avx2::api;
 #else
-    (void)force_avx2;
-    (void)force_baseline;
-    (void)cpu_has_avx2_fma;
+    (void)have_avx2;
+    if (mode == "avx2") {
+        throw std::runtime_error(
+            "FASTGOERTZEL_KERNEL=avx2 requested, but this build has no AVX2 kernel (not x86)");
+    }
 #endif
     return &arch::baseline::api;
 }
 
 }  // namespace
 
-const Api& active_api() noexcept {
-    static const Api* const chosen = select();  // thread-safe one-time initialisation
+const Api& active_api() {
+    // Thread-safe one-time initialisation. The first call happens during module import
+    // (the `_kernel` attribute), where an exception becomes a Python ImportError-time
+    // RuntimeError; later calls cannot throw.
+    static const Api* const chosen = select();
     return *chosen;
 }
 

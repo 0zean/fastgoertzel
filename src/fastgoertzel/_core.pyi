@@ -52,10 +52,13 @@ def goertzel_batch(
     fs: float | None = None,
     scale: _Scale = "amplitude",
     threads: int | None = None,
+    out: NDArray[np.float64] | None = None,
 ) -> NDArray[np.float64]:
     """``goertzel`` for every frequency; shape ``(len(frequencies), 2)`` of (value, phase).
 
     ``threads`` sets the OpenMP thread count for this call (``None`` = OpenMP default).
+    ``out`` is an optional preallocated float64 C-contiguous array of the result shape,
+    returned as the result; the call then allocates nothing.
     """
     ...
 
@@ -65,8 +68,12 @@ def goertzel_batch_complex(
     *,
     fs: float | None = None,
     threads: int | None = None,
+    out: NDArray[np.complex128] | None = None,
 ) -> NDArray[np.complex128]:
-    """``goertzel_complex`` for every frequency; shape ``(len(frequencies),)``."""
+    """``goertzel_complex`` for every frequency; shape ``(len(frequencies),)``.
+
+    ``out`` is an optional preallocated complex128 array of that shape.
+    """
     ...
 
 def goertzel_sliding_batch(
@@ -78,11 +85,14 @@ def goertzel_sliding_batch(
     fs: float | None = None,
     scale: _Scale = "amplitude",
     threads: int | None = None,
+    out: NDArray[np.float64] | None = None,
 ) -> NDArray[np.float64]:
     """``goertzel_batch`` over windows ``x[w*step : w*step + window_size]``.
 
     Returns shape ``((len(x) - window_size) // step + 1, len(frequencies), 2)``.
-    ``window_size`` must be in ``[1, len(x)]`` and ``step >= 1``.
+    ``window_size`` must be in ``[1, len(x)]`` and ``step >= 1``. ``out`` is an optional
+    preallocated float64 C-contiguous array of the result shape; reuse it across calls to
+    avoid allocating and page-faulting a large result every time.
     """
     ...
 
@@ -94,17 +104,19 @@ def goertzel_sliding_batch_complex(
     step: int = 1,
     fs: float | None = None,
     threads: int | None = None,
+    out: NDArray[np.complex128] | None = None,
 ) -> NDArray[np.complex128]:
     """``goertzel_sliding_batch`` returning the complex DTFT of each window.
 
     Shape ``((len(x) - window_size) // step + 1, len(frequencies))``; no ``sqrt``/``atan2``.
+    ``out`` is an optional preallocated complex128 array of that shape.
     """
     ...
 
 class GoertzelFilter:
     """Stateful Goertzel filter for streaming input.
 
-    ``push`` scalars or 1-D arrays in any chunking; ``result()`` equals ``goertzel`` over
+    ``push`` scalars or 1-D arrays in any chunking; ``result()`` is ``goertzel`` over
     everything pushed so far. Not safe for concurrent ``push`` on one instance.
     """
 

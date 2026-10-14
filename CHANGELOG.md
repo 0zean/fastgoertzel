@@ -4,22 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## 2.0.0[2.0.0.dev0] - 2026-10-13
+## [2.0.0] - 2026-10-13
 
 The 2.0 line: frequencies are evaluated exactly, the sample rate and a streaming filter
 are built in, the kernels are three to thirty times faster, and the build system, test
 suite, and documentation are new. See the
 [migration guide](https://0zean.github.io/fastgoertzel/migration.html) for upgrading.
 
-### 2.0.0Breaking
+### Breaking
 - **Frequencies are evaluated exactly.** In 1.x every function rounded
   `frequency * len(x)` *down* to an integer DFT bin, so `goertzel(x, 0.0099)` on 100
   samples silently returned the DC bin, and about 6 % of exact `k/N` inputs landed on
   bin `k-1` through floating-point rounding. 2.0 uses the generalized Goertzel
   algorithm: the DTFT is evaluated at exactly the frequency you pass. Results are
   unchanged whenever `frequency * len(x)` was an exact integer. If you relied on the old
-  bin behaviour, call `goertzel_bin(x, k)` with the integer bin, which is identical to
-  `numpy.fft.fft(x)[k]`.
+  bin behaviour, call `goertzel_bin(x, k)` with the integer bin, which is the same
+  quantity as `numpy.fft.fft(x)[k]` (equal to rounding).
 - Amplitudes at DC and Nyquist are now the true sinusoid amplitude (`|X|/N`); 1.x
   reported twice that value there.
 - Arguments after the positional ones are keyword-only: `goertzel(x, f, 8000)` is a
@@ -31,7 +31,7 @@ suite, and documentation are new. See the
   `CMakeLists.txt`. Build options are passed via `CMAKE_ARGS` (see README):
   `FASTGOERTZEL_NATIVE=1` becomes `CMAKE_ARGS=-DFASTGOERTZEL_NATIVE=ON`.
 
-### 2.0.0Added
+### Added
 - `fs=` keyword on every function and on `GoertzelFilter`: frequencies in hertz (or any
   unit of `fs`), converted as `frequency / fs`. Closes the long-standing README TODO.
 - `GoertzelFilter(frequency, *, fs=None)`: stateful streaming filter with `push()`
@@ -48,6 +48,15 @@ suite, and documentation are new. See the
   `'power'` (`|X|**2`, no square root).
 - `threads=` keyword on the batch and sliding functions: OpenMP thread count for that
   call; `threads=1` forces serial execution.
+- `out=` keyword on the batch and sliding functions: a preallocated result array (exact
+  shape and dtype, C-contiguous, writeable, not overlapping `x`) that the kernels write
+  into directly, so a call in a loop allocates nothing. For the sliding functions this
+  also removes the page-faulting of a fresh result, which was the bound on their thread
+  scaling: N = 1e5, W = 256, M = 8 on 32 threads goes from 2.2 ms to 1.0 ms (0.4 ms for
+  the complex form).
+- macOS wheels now bundle an OpenMP runtime (LLVM `libomp`, built for macOS 10.9 / 11.0),
+  so the batch and sliding functions are multi-threaded on macOS as on Linux and Windows.
+  The wheel build fails rather than ship a single-threaded macOS wheel.
 - `step=` keyword on the sliding functions for strided windows.
 - Type stubs (`_core.pyi`, `py.typed`), checked against the compiled module by stubtest
   in CI.
@@ -59,15 +68,15 @@ suite, and documentation are new. See the
   suite.
 - Python 3.14 in CI and in the wheel matrix. The module declares itself safe for
   free-threaded CPython (`py::mod_gil_not_used`); it holds no mutable global state.
-- macOS x86_64 wheels are now built and tested on an Intel runner instead of being
+- macOS x86_64 wheels are built and tested on an Intel runner instead of being
   cross-built untested.
 
-### 2.0.0Performance
+### Performance
 Measured on the reference machine (i9-14900KF, MSVC, AVX2+FMA kernel); see the README
 tables, which are rendered from one recorded benchmark run.
 - One frequency: 2.5 billion samples/s single-threaded, up from 0.65 in 1.0.3 (3.9x).
-  Signals of 4,096 samples or more run as up to eight independent blocks whose results
-  are combined with exact twiddles, which removes the recurrence's latency bound. The
+  Signals of 1,024 samples or more run as independent blocks of at least 512 samples
+  (up to eight from 4,096 samples on) whose results are combined with exact twiddles, which removes the recurrence's latency bound. The
   recurrence itself is written as `coeff*s1 + (x - s2)`, which contracts to one FMA.
 - Batch: up to eight frequencies share one pass over the signal; fewer frequencies are
   padded with signal blocks so eight chains always run. N = 1e6, M = 32: 12.6 ms on one
@@ -76,8 +85,9 @@ tables, which are rendered from one recorded benchmark run.
   passes for out-of-cache signals.
 - Sliding windows: sliding-DFT update with an exact re-synchronisation every 256
   windows; cost per hop no longer depends on the window length. N = 1e5, W = 256, M = 8:
-  11.8 ms on one thread (was 362 ms), 2.5 ms on 32 threads (was 17 ms). Step sizes of
-  `window_size / 4` or more fall back to exact per-window evaluation.
+  11.8 ms on one thread (was 362 ms), 2.2 ms on 32 threads (was 17 ms), 1.0 ms with a
+  reused `out=` array. Step sizes of `window_size / 4` or more fall back to exact
+  per-window evaluation.
 - Runtime dispatch: the hot loops are compiled for baseline x86-64 and for AVX2+FMA and
   selected at import. Wheels stay portable; `FASTGOERTZEL_KERNEL=baseline|avx2` overrides
   the choice and `fastgoertzel._core._kernel` reports it. The release workflow runs the
@@ -88,14 +98,20 @@ tables, which are rendered from one recorded benchmark run.
 - The final twiddle of the generalized form is reduced modulo one cycle with an
   error-free product, so accuracy does not degrade for long signals or high frequencies.
 
-### 2.0.0Changed
+### Changed
 - Repository layout: Python package in `src/fastgoertzel/`, header-only C++ core in
   `include/fastgoertzel/`, bindings and kernels in `cpp/`, C++ micro-benchmark in
   `benchmarks/cpp/`, Sphinx sources in `docs/`.
 - Warnings raised to `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`
   (`/W4 /permissive-` on MSVC) and treated as errors in CI.
+- `FASTGOERTZEL_KERNEL` is checked: a value other than `auto`, `baseline` or `avx2`
+  (case-insensitive), or `avx2` on a machine that cannot run it, fails the import with
+  a clear message instead of being ignored or crashing later.
+- Error messages and `repr(GoertzelFilter(...))` print numbers with 15 significant
+  digits instead of six fixed decimals (`-1e-09`, not `-0.000000`).
+- Free-threaded CPython 3.13t and 3.14t wheels are built alongside the regular ones.
 
-### 2.0.0Development
+### Development
 - Test suite: reference tests against `numpy.fft` and direct DTFT sums, Hypothesis
   property tests, subprocess crash guards, thread-count and kernel-build invariance,
   streaming and sliding equivalence, machine-independent performance ratio guards,
@@ -109,12 +125,12 @@ tables, which are rendered from one recorded benchmark run.
   release checklist, `benchmarks/render_tables.py` to render the README tables from a
   benchmark JSON report.
 
-## 2.0.0[1.0.3] - 2026-10-13
+## [1.0.3] - 2026-10-13
 
 Patch release: crash safety, portable wheels, correct metadata. Results for valid inputs
 are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit on arm64).
 
-### 2.0.0Fixed
+### Fixed
 - `goertzel_sliding_batch` terminated the Python process for any out-of-range frequency
   or `window_size == 0` (exception thrown inside an OpenMP region). All validation now
   happens before the GIL is released and before any parallel region.
@@ -129,7 +145,7 @@ are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit o
 - License metadata said MIT on PyPI while shipping GPLv3 text. The project is GPLv3+
   and the metadata now says so.
 
-### 2.0.0Changed
+### Changed
 - Build flags: removed `-march=native`, `-mavx2`, `/arch:AVX2`, `-ffast-math`, `/fp:fast`,
   `/Qpar`, `-funroll-loops`, `-ftree-vectorize`, `-flto`. Published wheels now run on any
   x86-64 or arm64 CPU, and importing the module no longer changes the process's
@@ -146,7 +162,7 @@ are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit o
 - Benchmark script rewritten with named baselines, thread-pinned runs, per-call latency
   percentiles, and JSON output.
 
-### 2.0.0Added
+### Added
 - Source distribution is now published alongside wheels.
 - Windows wheels bundle the OpenMP runtime (`vcomp140.dll`) via delvewheel.
 - Linux aarch64 wheels, macOS x86_64 wheels.
@@ -156,6 +172,6 @@ are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit o
 - README roadmap for 2.0 (exact non-integer-bin frequencies, streaming filter API,
   sampling-rate support, faster kernels).
 
-## 2.0.0[1.0.2] - 2025-12-28
+## [1.0.2] - 2025-12-28
 
 Previous release; see git history.

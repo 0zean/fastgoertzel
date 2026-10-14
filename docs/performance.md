@@ -28,10 +28,10 @@ guards against large regressions with machine-independent ratio checks.
 
 - **One frequency** is single-threaded by design. The Goertzel recurrence is a
   dependency chain that costs a few cycles per sample however the loop is written;
-  signals of 4,096 samples or more are therefore split into up to eight independent
-  blocks whose results are combined exactly, which keeps the FMA units busy. The hot
-  loops are compiled for baseline x86-64 and for AVX2+FMA and the build is chosen at
-  import.
+  signals of 1,024 samples or more are therefore split into independent blocks of at
+  least 512 samples (up to eight) whose results are combined exactly, which keeps the
+  FMA units busy. The hot loops are compiled for baseline x86-64 and for AVX2+FMA and the
+  build is chosen at import.
 - **Several frequencies.** On one thread a batch costs the same per frequency as a
   single call: both run eight chains and are compute-bound once the signal is in cache.
   What the batch adds is OpenMP over lane groups, and one pass over the data per eight
@@ -42,7 +42,7 @@ guards against large regressions with machine-independent ratio checks.
   `goertzel_sliding_batch_complex` skips.
 - **Per-call latency** includes Python call overhead. Calls that enter an OpenMP region
   carry a heavier tail: pass `threads=1` or keep the work below the 65,536
-  sample-frequency threshold for predictable latency on small inputs.
+  operation threshold for predictable latency on small inputs.
 
 ## Measured
 

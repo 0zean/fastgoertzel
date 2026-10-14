@@ -54,7 +54,7 @@ struct Api {
 
 /// The implementation selected for this process (CPU detection at first use, overridable
 /// with the environment variable FASTGOERTZEL_KERNEL=baseline|avx2|auto).
-const Api& active_api() noexcept;
+const Api& active_api();  // may throw std::runtime_error on first use (bad FASTGOERTZEL_KERNEL)
 
 }  // namespace fastgoertzel::kernels
 

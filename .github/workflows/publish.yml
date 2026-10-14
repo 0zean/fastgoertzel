@@ -1,10 +1,10 @@
 name: Publish to PyPI
 
+# Triggered by the release tag only. A GitHub Release created from that tag afterwards must
+# not start a second run, which would fail at upload because the files already exist.
 on:
   push:
     tags: ["v*"]
-  release:
-    types: [published]
   workflow_dispatch:
 
 jobs:
@@ -18,9 +18,12 @@ jobs:
           python-version: "3.12"
       - run: pipx run build --sdist
       - name: Check sdist installs and passes tests
+        # Same deterministic subset as the wheel tests: the property tests need hypothesis
+        # and the timing tests are meaningless on a shared runner.
         run: |
           python -m pip install pytest dist/*.tar.gz
-          pytest tests -q
+          pytest tests -q -p no:cacheprovider \
+            --ignore=tests/test_properties.py --ignore=tests/test_performance.py
       - uses: actions/upload-artifact@v4
         with:
           name: sdist

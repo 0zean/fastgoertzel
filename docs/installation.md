@@ -11,7 +11,7 @@ Wheels are published for:
 | Platform | Architectures | OpenMP |
 |---|---|---|
 | Linux (manylinux, musllinux) | x86_64, aarch64, i686 | yes |
-| macOS | x86_64, arm64 | no (see below) |
+| macOS | x86_64, arm64 | yes, runtime bundled (see below) |
 | Windows | AMD64 | yes, runtime bundled |
 
 for CPython 3.10 to 3.14. A source distribution is published as well. The only runtime
@@ -47,9 +47,12 @@ with the `CMAKE_ARGS` environment variable, for example
 
 ### OpenMP on macOS
 
-Apple's compiler ships without OpenMP, so the macOS wheels are single-threaded: the batch
-and sliding functions still work, and `threads=` is accepted and ignored. To get
-multi-threaded batches on macOS, install `libomp` from Homebrew and build from source:
+Apple's compiler ships no OpenMP runtime. The published macOS wheels bundle LLVM's
+`libomp.dylib` (the build targets macOS 10.9 on x86_64 and 11.0 on arm64, so the wheels
+keep their normal minimum versions), and the wheel build refuses to produce a
+single-threaded macOS wheel. When building from source on macOS, install `libomp` from
+Homebrew and point CMake at it, otherwise the build is single-threaded: the batch and
+sliding functions still work and `threads=` is accepted and ignored.
 
 ```bash
 brew install libomp

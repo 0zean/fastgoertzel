@@ -450,7 +450,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "mypy", specifier = ">=1.14" },
     { name = "pre-commit", specifier = ">=4.0" },
-    { name = "pybind11", specifier = ">=2.12" },
+    { name = "pybind11", specifier = ">=2.13" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-benchmark", specifier = ">=5.1.0" },
     { name = "ruff", specifier = ">=0.14.1" },

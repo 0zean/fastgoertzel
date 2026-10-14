@@ -1,7 +1,7 @@
 [build-system]
 requires = [
     "scikit-build-core>=0.10",
-    "pybind11>=2.12",
+    "pybind11>=2.13",
 ]
 build-backend = "scikit_build_core.build"
 
@@ -56,7 +56,7 @@ dev = [
     "hypothesis>=6.100",
     "mypy>=1.14",
     "pre-commit>=4.0",
-    "pybind11>=2.12",
+    "pybind11>=2.13",
     "pytest>=8.4.2",
     "pytest-benchmark>=5.1.0",
     "ruff>=0.14.1",
@@ -117,7 +117,10 @@ strict = true
 files = ["src/fastgoertzel", "benchmarks/benchmark.py", "benchmarks/render_tables.py"]
 
 [tool.cibuildwheel]
-build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
+build = "cp310-* cp311-* cp312-* cp313-* cp314-* cp313t-* cp314t-*"
+# The module declares itself free-threading safe (py::mod_gil_not_used), so free-threaded
+# CPython gets wheels too; test_concurrency.py runs inside each wheel build.
+enable = ["cpython-freethreading"]
 skip = "*-musllinux_i686"
 build-verbosity = 1
 # Property-based and timing tests need extra packages and are meaningless under the
@@ -132,7 +135,17 @@ repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 
 # macOS: each architecture is built and tested natively, arm64 on macos-latest and x86_64 on
 # macos-15-intel (see publish.yml), so no cross-built wheel ships untested. Apple Clang has
-# no OpenMP, so macOS wheels are single-threaded (see README).
+# no OpenMP runtime; tools/wheels/macos_openmp.sh fetches one that targets macOS 10.9/11.0
+# (why not Homebrew's is explained there), CMake finds it through OpenMP_ROOT, the rpath
+# lets delocate locate and bundle libomp.dylib, and the test command refuses a wheel that
+# came out single-threaded.
+[tool.cibuildwheel.macos]
+before-all = "bash {package}/tools/wheels/macos_openmp.sh"
+environment = { CMAKE_ARGS = "$CMAKE_ARGS -DOpenMP_ROOT=$HOME/openmp", LDFLAGS = "$LDFLAGS -Wl,-rpath,$HOME/openmp/lib" }
+test-command = [
+    "python -c \"import fastgoertzel._core as c; assert c._has_openmp, 'macOS wheel was built without OpenMP'\"",
+    "pytest {project}/tests -q -p no:cacheprovider --ignore={project}/tests/test_properties.py --ignore={project}/tests/test_performance.py",
+]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64", "i686"]
@@ -143,14 +156,15 @@ current_version = "2.0.0"
 version_pattern = "MAJOR.MINOR.PATCH[.PYTAGNUM]"
 commit_message = "Bump version to {new_version}"
 commit = true
-tag = true
+# The release tag is created by hand as vX.Y.Z (see CONTRIBUTING.md): bumpver would name it
+# X.Y.Z, which the publish workflow does not trigger on. CHANGELOG.md is deliberately not a
+# file pattern: its release heading is written by hand together with the date, and bumpver's
+# pattern syntax treats the Keep-a-Changelog brackets as an optional group.
+tag = false
 push = false
 
 [tool.bumpver.file_patterns]
 "pyproject.toml" = [
     '^version = "{version}"$',
     '^current_version = "{version}"$',
-]
-"CHANGELOG.md" = [
-    "## [{version}]",
 ]

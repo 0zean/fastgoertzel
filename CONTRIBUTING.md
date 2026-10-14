@@ -61,16 +61,19 @@ regressions with ratio checks that are machine independent.
 
 ## Release checklist
 
-1. Update `CHANGELOG.md`: move the unreleased notes under the new version and date.
-   Re-render the README performance tables from a fresh run (`make bench`,
-   `make readme-tables`) if the kernels changed.
-2. Bump the version in `pyproject.toml` with bumpver, which also tags:
+1. Update `CHANGELOG.md` by hand: change the heading of the unreleased section to
+   `## [X.Y.Z] - YYYY-MM-DD`. Re-render the README performance tables from a fresh run
+   (`make bench`, `make readme-tables`) if the kernels changed, with nothing else running.
+2. Bump the version in `pyproject.toml` with bumpver, which commits:
    `uv run bumpver update --tag final` (dev → release) or `--patch` / `--minor` / `--major`.
+   Then `uv lock` and commit the lockfile, otherwise `uv sync --locked` fails at the tag.
 3. Push the branch, open a pull request, wait for CI (matrix, sanitizers, C++ tests,
-   clang-tidy, wheel smoke) to pass, merge.
-4. Push the tag (`git push upstream vX.Y.Z`). The publish workflow builds the sdist and all
-   wheels, runs the test suite inside each wheel build and once more under QEMU with a
-   pre-AVX CPU, then uploads with PyPI trusted publishing. Pushing the tag yourself, rather
-   than creating a GitHub Release first, avoids triggering the workflow twice.
-5. Create the GitHub Release from the existing tag with the CHANGELOG section as notes.
-   The documentation site is rebuilt and deployed by the merge to `master`.
+   clang-tidy, docs, wheel smoke) to pass, merge.
+4. Tag the merge commit `vX.Y.Z` (the `v` matters: the publish workflow triggers on
+   `v*` tags only) and push it: `git tag -a vX.Y.Z -m "fastgoertzel X.Y.Z"`,
+   `git push upstream vX.Y.Z`. The publish workflow builds the sdist and all wheels, runs
+   the test suite inside each wheel build and once more under QEMU with a pre-AVX CPU,
+   then uploads with PyPI trusted publishing.
+5. After the upload, create the GitHub Release from the existing tag with the CHANGELOG
+   section as notes. Creating a Release does not re-run the publish workflow. The
+   documentation site is rebuilt and deployed by the merge to `master`.

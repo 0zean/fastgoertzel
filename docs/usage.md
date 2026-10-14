@@ -30,10 +30,11 @@ frequency outside its range or not finite, a non-positive `fs`, a `window_size` 
 `[1, len(x)]`, or `step` or `threads` below 1. Validation happens before the GIL is
 released and before any parallel region, so no input can crash the interpreter.
 
-**Determinism.** Results do not depend on the thread count or on which kernel build
-(baseline or AVX2) the CPU selected, beyond rounding at the 1e-12 level. The work
-decomposition depends only on the input sizes, and partial results are combined in a
-fixed order.
+**Determinism.** Results do not depend on the thread count: the work decomposition
+depends only on the input sizes and partial results are combined in a fixed order. The
+lane kernels are bit-identical between the baseline and AVX2 builds; the sliding
+functions' per-window arithmetic differs between the two builds only in the last bits
+(about 1e-9 relative).
 
 ## One frequency
 
@@ -78,7 +79,7 @@ res = fg.goertzel_batch(x, [430, 440, 450], fs=fs, scale="power")   # shape (3, 
 Xs = fg.goertzel_batch_complex(x, [430, 440, 450], fs=fs)           # shape (3,), complex
 ```
 
-Row `i` equals the single-frequency call for `frequencies[i]`. Up to eight frequencies
+Row `i` is the single-frequency call for `frequencies[i]`, equal to rounding. Up to eight frequencies
 share one pass over the signal, and the frequency groups are distributed over OpenMP
 threads when the build has OpenMP and `len(x) * len(frequencies)` is at least 65,536.
 `threads=` sets the thread count for that call; `threads=1` forces serial execution.
@@ -96,7 +97,8 @@ winX = fg.goertzel_sliding_batch_complex(x, 1024, [440, 880], step=256, fs=fs)  
 ```
 
 Window `w` covers `x[w*step : w*step + window_size]` and there are
-`(len(x) - window_size) // step + 1` windows. When `4 * step < window_size`, consecutive
+`(len(x) - window_size) // step + 1` windows. The result is large, `n_windows * M * 16`
+bytes; in a loop, allocate it once and pass it as `out=` (see below). When `4 * step < window_size`, consecutive
 windows are obtained with the sliding-DFT update, which costs a constant amount per hop
 regardless of the window length; every 256 windows the value is recomputed from scratch
 so rounding error cannot accumulate. For larger steps each window is computed directly.
@@ -117,8 +119,8 @@ flt.reset()
 
 `GoertzelFilter` is the Goertzel algorithm used as what it is, a second-order IIR filter:
 samples enter as they arrive and the spectrum at the chosen frequency is available at any
-time without buffering. `result()` equals `goertzel` applied to the concatenation of
-everything pushed, whatever the chunking. Chunks of 4,096 samples or more go through the
+time without buffering. `result()` is `goertzel` applied to the concatenation of
+everything pushed, whatever the chunking, equal to rounding. Chunks of 4,096 samples or more go through the
 same block-parallel kernel as the one-shot functions. An instance holds a few words of
 state and no buffers. Do not push to one instance from two threads at once.
 
@@ -126,12 +128,38 @@ state and no buffers. Do not push to one instance from two threads at once.
 
 - The single-frequency functions and `GoertzelFilter` never start threads; their latency
   is a function of `len(x)` only, around a microsecond for short signals.
-- `goertzel_batch` and the sliding functions enter an OpenMP region when the work is at
-  least 65,536 sample-frequency products. Entering a parallel region costs tens of
+- `goertzel_batch` and the sliding functions enter an OpenMP region when the estimated
+  work is at least 65,536 operations: samples times frequencies for the batch functions;
+  for the sliding functions, windows times frequencies times the per-hop cost (four times
+  `step` with the sliding update, otherwise the window length). Entering a parallel region costs tens of
   microseconds and has a heavier tail. For predictable latency on small inputs pass
   `threads=1`, keep the work below the threshold, or set `OMP_NUM_THREADS=1`.
 - The GIL is released in every call, so Python threads can run calls concurrently.
 - `fastgoertzel._core._has_openmp` and `fastgoertzel._core._kernel` report the build.
+
+### Preallocated output
+
+The four array-returning functions accept `out=`: a C-contiguous, writeable array of the
+exact result shape and dtype (float64 for the `(value, phase)` forms, complex128 for the
+`*_complex` forms) that must not share memory with `x`. The kernels write into it directly
+and the call returns it, so nothing is allocated. Anything that does not match raises
+`ValueError` before any computation; it is never silently copied or cast.
+
+```python
+n_windows = (len(x) - 1024) // 256 + 1
+buf = np.empty((n_windows, 2, 2))
+for frame in frames:                              # frames of the same length as x
+    fg.goertzel_sliding_batch(frame, 1024, [440, 880], step=256, fs=fs, out=buf)
+    ...                                           # read buf before the next call
+```
+
+This matters most for the sliding functions. Their result is large, and a freshly
+allocated NumPy array is not backed by memory until it is first written, so the OpenMP
+threads spend their time page-faulting it in, which serialises in the kernel. On the
+reference machine the N = 100,000, W = 256, M = 8 case takes 2.2 ms with a fresh result
+and 1.0 ms with a reused one on 32 threads (0.4 ms for the complex form), and the
+single-thread to eight-thread speed-up goes from 3x to 7x. For the batch functions the
+result is small and the gain is only the allocation itself.
 
 ## Accuracy
 
@@ -139,7 +167,7 @@ Rounding error of the recurrence grows roughly linearly with the signal length a
 largest near DC and Nyquist, where the filter's poles approach the real axis of the unit
 circle. Measured against a direct DTFT sum in float64: about 2e-10 relative error at one
 million samples for interior frequencies and about 2e-5 for the first bin. Signals of
-4,096 samples or more are split into blocks whose results are combined exactly, which
+1,024 samples or more are split into blocks whose results are combined exactly, which
 also shortens the error growth. Use float64 input; float32 is converted and offers no
 speed advantage.
 

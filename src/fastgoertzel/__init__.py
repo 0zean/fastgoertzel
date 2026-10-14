@@ -12,7 +12,7 @@ goertzel(x, frequency, *, fs=None, scale="amplitude")
 goertzel_complex(x, frequency, *, fs=None)
     Unscaled complex DTFT value at one frequency.
 goertzel_bin(x, k, *, scale="amplitude")
-    DFT bin ``k`` (integer-bin form, identical to ``numpy.fft.fft(x)[k]``).
+    DFT bin ``k`` (integer-bin form, the same quantity as ``numpy.fft.fft(x)[k]``).
 goertzel_batch(x, frequencies, *, fs=None, scale="amplitude", threads=None)
     Several frequencies in one call, OpenMP-parallel where available.
 goertzel_batch_complex(x, frequencies, *, fs=None, threads=None)

@@ -186,7 +186,8 @@ jobs:
       - name: Build and test one wheel per platform
         uses: pypa/cibuildwheel@v3.1.4
         env:
-          CIBW_BUILD: cp312-*
+          # One regular and one free-threaded interpreter per platform.
+          CIBW_BUILD: cp312-* cp314t-*
           CIBW_ARCHS_LINUX: x86_64
           CIBW_ARCHS_MACOS: arm64
           CIBW_ARCHS_WINDOWS: AMD64

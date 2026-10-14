@@ -112,13 +112,18 @@ def render(report: dict[str, Any]) -> str:
 
     if report.get("threads"):
         out.append("")
-        out.append("**OpenMP scaling**, batch N = 1e6, M = 32 and sliding N = 1e5, W = 256, M = 8:")
+        out.append(
+            "**OpenMP scaling**, batch N = 1e6, M = 32 and sliding N = 1e5, W = 256, M = 8; "
+            "the last column reuses one preallocated `out=` array across calls:"
+        )
         out.append("")
-        out.append("| OMP_NUM_THREADS | batch | sliding |")
-        out.append("|---:|---:|---:|")
+        out.append("| OMP_NUM_THREADS | batch | sliding | sliding, `out=` |")
+        out.append("|---:|---:|---:|---:|")
         for row in report["threads"]:
+            so = row.get("sliding_out_seconds")
             out.append(
-                f"| {row['threads']} | {fmt_time(row['batch_seconds'])} | {fmt_time(row['sliding_seconds'])} |"
+                f"| {row['threads']} | {fmt_time(row['batch_seconds'])} | "
+                f"{fmt_time(row['sliding_seconds'])} | {fmt_time(so) if so else 'n/a'} |"
             )
 
     if "latency" in report:
@@ -142,7 +147,8 @@ def update_readme(path: Path, block: str) -> None:
     if not pattern.search(text):
         sys.exit(f"{path}: markers {START} / {END} not found")
     new = pattern.sub(lambda _: f"{START}\n{block}{END}", text)
-    path.write_text(new, encoding="utf-8")
+    # The repository is LF-only; without this Windows would write CRLF into the new block.
+    path.write_text(new, encoding="utf-8", newline="\n")
 
 
 def main() -> None:

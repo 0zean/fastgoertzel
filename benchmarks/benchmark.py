@@ -277,10 +277,13 @@ def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict[str
         f"t=timeit.Timer(lambda: fg.goertzel_batch(x, fr)); n,_=t.autorange(); b=min(t.repeat({repeat},n))/n\n"
         "y=x[:100_000]; fr2=np.round((np.arange(8)+1)/9*0.5*256)/256\n"
         f"t=timeit.Timer(lambda: fg.goertzel_sliding_batch(y,256,fr2)); n,_=t.autorange(); s=min(t.repeat({repeat},n))/n\n"
-        "print(b, s)"
+        "o=np.empty((len(y)-256+1, 8, 2))\n"
+        f"t=timeit.Timer(lambda: fg.goertzel_sliding_batch(y,256,fr2,out=o)); n,_=t.autorange(); so=min(t.repeat({repeat},n))/n\n"
+        "print(b, s, so)"
     )
     rows: list[dict[str, Any]] = []
     print("=== OpenMP scaling: batch (N=1e6, M=32) and sliding (N=1e5, W=256, M=8) ===")
+    print("    'sliding, out=' reuses one preallocated result array across calls")
     for th in thread_counts:
         env = dict(os.environ)
         env.pop("OMP_NUM_THREADS", None)
@@ -293,10 +296,15 @@ def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict[str
             env=env,
             check=True,
         ).stdout
-        b, s = (float(v) for v in out.split())
+        b, s, so = (float(v) for v in out.split())
         label = "default" if th is None else str(th)
-        print(f"   OMP_NUM_THREADS={label:<8} batch {fmt_s(b)}   sliding {fmt_s(s)}")
-        rows.append({"threads": label, "batch_seconds": b, "sliding_seconds": s})
+        print(
+            f"   OMP_NUM_THREADS={label:<8} batch {fmt_s(b)}   sliding {fmt_s(s)}"
+            f"   sliding, out= {fmt_s(so)}"
+        )
+        rows.append(
+            {"threads": label, "batch_seconds": b, "sliding_seconds": s, "sliding_out_seconds": so}
+        )
     print()
     return rows
 
@@ -349,6 +357,13 @@ def bench_latency(calls: int, rng: np.random.Generator) -> list[dict[str, Any]]:
     x1k = rng.standard_normal(1_024)
     cases.append(
         ("sliding         N=1024 W=256 M=4", lambda: fg.goertzel_sliding_batch(x1k, 256, f8[:4]))
+    )
+    buf1k = np.empty((1_024 - 256 + 1, 4, 2))
+    cases.append(
+        (
+            "sliding (out=)  N=1024 W=256 M=4",
+            lambda: fg.goertzel_sliding_batch(x1k, 256, f8[:4], out=buf1k),
+        )
     )
     ref = rng.standard_normal(256)
     cases.append(("np.fft.rfft     N=256 (reference)", lambda: np.fft.rfft(ref)))
