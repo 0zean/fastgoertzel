@@ -136,12 +136,12 @@ repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 # macOS: each architecture is built and tested natively, arm64 on macos-latest and x86_64 on
 # macos-15-intel (see publish.yml), so no cross-built wheel ships untested. Apple Clang has
 # no OpenMP runtime; tools/wheels/macos_openmp.sh fetches one that targets macOS 10.9/11.0
-# (why not Homebrew's is explained there), CMake finds it through OpenMP_ROOT, the rpath
-# lets delocate locate and bundle libomp.dylib, and the test command refuses a wheel that
-# came out single-threaded.
+# (why not Homebrew's is explained there), CMake finds it through OpenMP_ROOT and records
+# its directory as the install rpath (CMakeLists.txt) so delocate can locate and bundle
+# libomp.dylib, and the test command refuses a wheel that came out single-threaded.
 [tool.cibuildwheel.macos]
 before-all = "bash {package}/tools/wheels/macos_openmp.sh"
-environment = { CMAKE_ARGS = "$CMAKE_ARGS -DOpenMP_ROOT=$HOME/openmp", LDFLAGS = "$LDFLAGS -Wl,-rpath,$HOME/openmp/lib" }
+environment = { CMAKE_ARGS = "$CMAKE_ARGS -DOpenMP_ROOT=$HOME/openmp" }
 test-command = [
     "python -c \"import fastgoertzel._core as c; assert c._has_openmp, 'macOS wheel was built without OpenMP'\"",
     "pytest {project}/tests -q -p no:cacheprovider --ignore={project}/tests/test_properties.py --ignore={project}/tests/test_performance.py",

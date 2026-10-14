@@ -9,7 +9,8 @@
 # macOS wheels the same way.
 #
 # Result: $HOME/openmp/{include/omp.h,lib/libomp.dylib}. pyproject.toml points CMake at it
-# with -DOpenMP_ROOT and adds an rpath so delocate can find the dylib and bundle it.
+# with -DOpenMP_ROOT; CMakeLists.txt keeps its directory as the module's install rpath so
+# that delocate can find the dylib (its install name is @rpath/libomp.dylib) and bundle it.
 set -euo pipefail
 
 base="https://api.anaconda.org/download/conda-forge/llvm-openmp/12.0.1"

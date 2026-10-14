@@ -114,6 +114,26 @@ if(FASTGOERTZEL_BUILD_PYTHON)
   endif()
   if(FASTGOERTZEL_HAVE_OPENMP)
     target_link_libraries(_core PRIVATE OpenMP::OpenMP_CXX)
+    if(APPLE)
+      # LLVM's libomp.dylib (conda-forge build used for the wheels) has an @rpath install
+      # name. CMake puts its directory on the build-tree rpath and strips that entry again
+      # at install, so the installed module could not resolve the library and delocate
+      # could not bundle it. Keeping the directory as the install rpath fixes both; delocate
+      # then rewrites the load command to the bundled copy. Homebrew's libomp has an
+      # absolute install name and is unaffected either way.
+      set(_fg_omp_dirs "")
+      foreach(_fg_lib IN LISTS OpenMP_CXX_LIB_NAMES)
+        if(OpenMP_${_fg_lib}_LIBRARY)
+          get_filename_component(_fg_dir "${OpenMP_${_fg_lib}_LIBRARY}" DIRECTORY)
+          list(APPEND _fg_omp_dirs "${_fg_dir}")
+        endif()
+      endforeach()
+      if(_fg_omp_dirs)
+        list(REMOVE_DUPLICATES _fg_omp_dirs)
+        set_target_properties(_core PROPERTIES INSTALL_RPATH "${_fg_omp_dirs}")
+        message(STATUS "fastgoertzel: install rpath for OpenMP: ${_fg_omp_dirs}")
+      endif()
+    endif()
   endif()
 
   install(TARGETS _core LIBRARY DESTINATION fastgoertzel)
