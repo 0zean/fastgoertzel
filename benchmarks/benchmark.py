@@ -34,6 +34,7 @@ was measured against and the thread count.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import math
 import os
@@ -44,9 +45,10 @@ import sys
 import time
 import timeit
 from dataclasses import asdict, dataclass
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
+from numpy.typing import NDArray
 
 # --------------------------------------------------------------------------- #
 # Reference implementations
@@ -61,7 +63,7 @@ def py_goertzel(xs: list[float], f: float) -> tuple[float, float]:
     be used as the baseline for a speed-up claim.
     """
     n = len(xs)
-    k = int(f * n)
+    k = round(f * n)
     w = 2.0 * math.pi * k / n
     cw, sw = math.cos(w), math.sin(w)
     c = 2.0 * cw
@@ -75,28 +77,30 @@ def py_goertzel(xs: list[float], f: float) -> tuple[float, float]:
     return math.hypot(re, im) / (n / 2.0), math.atan2(im, re)
 
 
-def np_single_bin(x: np.ndarray, f: float) -> tuple[float, float]:
+def np_single_bin(x: NDArray[np.float64], f: float) -> tuple[float, float]:
     """Vectorised single-bin DFT with two real dot products (no complex temporaries)."""
     n = len(x)
-    k = int(f * n)
+    k = round(f * n)
     ang = (2.0 * math.pi * k / n) * np.arange(n)
     re = float(np.dot(x, np.cos(ang)))
     im = -float(np.dot(x, np.sin(ang)))
     return math.hypot(re, im) / (n / 2.0), math.atan2(im, re)
 
 
-def np_rfft_bin(x: np.ndarray, f: float) -> tuple[float, float]:
+def np_rfft_bin(x: NDArray[np.float64], f: float) -> tuple[float, float]:
     """Full real FFT, then pick one bin.  Computes every bin, so it is the
     natural baseline when a user needs more than a handful of frequencies."""
     n = len(x)
-    k = int(f * n)
+    k = round(f * n)
     X = np.fft.rfft(x)[k]
     return abs(X) / (n / 2.0), float(np.angle(X))
 
 
-def np_sliding_rfft(x: np.ndarray, window: int, freqs: np.ndarray) -> np.ndarray:
+def np_sliding_rfft(
+    x: NDArray[np.float64], window: int, freqs: NDArray[np.float64]
+) -> NDArray[np.float64]:
     v = np.lib.stride_tricks.sliding_window_view(x, window)
-    X = np.fft.rfft(v, axis=1)[:, (freqs * window).astype(int)]
+    X = np.fft.rfft(v, axis=1)[:, np.rint(freqs * window).astype(int)]
     return np.stack([np.abs(X) / (window / 2.0), np.angle(X)], axis=-1)
 
 
@@ -137,7 +141,7 @@ def ratio(ref: Timing, fg: Timing) -> str:
     return f"{ref.seconds_min / fg.seconds_min:5.1f}x"
 
 
-def environment(threads: str) -> dict:
+def environment(threads: str) -> dict[str, Any]:
     import fastgoertzel
 
     cpu = platform.processor()
@@ -158,6 +162,7 @@ def environment(threads: str) -> dict:
         "cpu_flags": flags,
         "logical_cores": os.cpu_count(),
         "omp_num_threads": threads,
+        "kernel": getattr(fastgoertzel._core, "_kernel", "unknown"),
     }
 
 
@@ -168,17 +173,17 @@ def environment(threads: str) -> dict:
 
 def bench_single(
     sizes: list[int], repeat: int, with_python: bool, rng: np.random.Generator
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     import fastgoertzel as fg
 
-    f = 0.1
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== goertzel(x, f): one frequency ===")
     print(
         f"{'N':>10} | {'fastgoertzel':>12} {'MS/s':>7} | {'pure Python':>12} {'x':>6} | {'NumPy 2x dot':>12} {'x':>6} | {'np.fft.rfft':>12} {'x':>6}"
     )
     for n in sizes:
         x = rng.standard_normal(n)
+        f = round(0.1 * n) / n  # bin-aligned, so every baseline evaluates the same quantity
         t_fg = time_call("fastgoertzel", lambda: fg.goertzel(x, f), repeat)
         t_np = time_call("numpy_two_dots", lambda: np_single_bin(x, f), repeat)
         t_fft = time_call("numpy_rfft", lambda: np_rfft_bin(x, f), repeat)
@@ -210,17 +215,19 @@ def bench_single(
     return rows
 
 
-def bench_batch(cases: list[tuple[int, int]], repeat: int, rng: np.random.Generator) -> list[dict]:
+def bench_batch(
+    cases: list[tuple[int, int]], repeat: int, rng: np.random.Generator
+) -> list[dict[str, Any]]:
     import fastgoertzel as fg
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== goertzel_batch(x, freqs): N samples x M frequencies ===")
     print(
         f"{'N':>10} {'M':>4} | {'fg batch':>12} | {'M x goertzel':>12} {'x':>6} | {'np.fft.rfft':>12} {'x':>6} | {'M x NumPy dot':>13} {'x':>6}"
     )
     for n, m in cases:
         x = rng.standard_normal(n)
-        freqs = (np.arange(m) + 1) / (m + 1) * 0.5
+        freqs = np.round((np.arange(m) + 1) / (m + 1) * 0.5 * n) / n  # bin-aligned
         t_b = time_call("fastgoertzel_batch", lambda: fg.goertzel_batch(x, freqs), repeat)
         t_s = time_call("m_x_goertzel", lambda: [fg.goertzel(x, v) for v in freqs], repeat)
         t_fft = time_call("numpy_rfft_all_bins", lambda: np.fft.rfft(x), repeat)
@@ -239,15 +246,15 @@ def bench_batch(cases: list[tuple[int, int]], repeat: int, rng: np.random.Genera
 
 def bench_sliding(
     cases: list[tuple[int, int, int]], repeat: int, rng: np.random.Generator
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     import fastgoertzel as fg
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== goertzel_sliding_batch(x, W, freqs): N samples, window W, M frequencies ===")
     print(f"{'N':>8} {'W':>5} {'M':>4} | {'fg sliding':>12} | {'NumPy windows+rfft':>18} {'x':>6}")
     for n, w, m in cases:
         x = rng.standard_normal(n)
-        freqs = (np.arange(m) + 1) / (m + 1) * 0.5
+        freqs = np.round((np.arange(m) + 1) / (m + 1) * 0.5 * w) / w  # bins of the window
         t_s = time_call(
             "fastgoertzel_sliding",
             lambda: fg.goertzel_sliding_batch(x, w, freqs),
@@ -262,18 +269,21 @@ def bench_sliding(
     return rows
 
 
-def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict]:
+def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict[str, Any]]:
     """Re-run the OpenMP functions in subprocesses with OMP_NUM_THREADS pinned."""
     code = (
         "import numpy as np, fastgoertzel as fg, timeit\n"
-        "x=np.random.default_rng(1).standard_normal(1_000_000); fr=(np.arange(32)+1)/33*0.5\n"
+        "x=np.random.default_rng(1).standard_normal(1_000_000); fr=np.round((np.arange(32)+1)/33*0.5*1e6)/1e6\n"
         f"t=timeit.Timer(lambda: fg.goertzel_batch(x, fr)); n,_=t.autorange(); b=min(t.repeat({repeat},n))/n\n"
-        "y=x[:100_000]; fr2=(np.arange(8)+1)/9*0.5\n"
+        "y=x[:100_000]; fr2=np.round((np.arange(8)+1)/9*0.5*256)/256\n"
         f"t=timeit.Timer(lambda: fg.goertzel_sliding_batch(y,256,fr2)); n,_=t.autorange(); s=min(t.repeat({repeat},n))/n\n"
-        "print(b, s)"
+        "o=np.empty((len(y)-256+1, 8, 2))\n"
+        f"t=timeit.Timer(lambda: fg.goertzel_sliding_batch(y,256,fr2,out=o)); n,_=t.autorange(); so=min(t.repeat({repeat},n))/n\n"
+        "print(b, s, so)"
     )
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print("=== OpenMP scaling: batch (N=1e6, M=32) and sliding (N=1e5, W=256, M=8) ===")
+    print("    'sliding, out=' reuses one preallocated result array across calls")
     for th in thread_counts:
         env = dict(os.environ)
         env.pop("OMP_NUM_THREADS", None)
@@ -286,15 +296,22 @@ def bench_threads(thread_counts: list[int | None], repeat: int) -> list[dict]:
             env=env,
             check=True,
         ).stdout
-        b, s = (float(v) for v in out.split())
+        b, s, so = (float(v) for v in out.split())
         label = "default" if th is None else str(th)
-        print(f"   OMP_NUM_THREADS={label:<8} batch {fmt_s(b)}   sliding {fmt_s(s)}")
-        rows.append({"threads": label, "batch_seconds": b, "sliding_seconds": s})
+        print(
+            f"   OMP_NUM_THREADS={label:<8} batch {fmt_s(b)}   sliding {fmt_s(s)}"
+            f"   sliding, out= {fmt_s(so)}"
+        )
+        rows.append(
+            {"threads": label, "batch_seconds": b, "sliding_seconds": s, "sliding_out_seconds": so}
+        )
     print()
     return rows
 
 
-def latency_percentiles(fn: Callable[[], object], calls: int, warmup: int = 2_000) -> dict:
+def latency_percentiles(
+    fn: Callable[[], object], calls: int, warmup: int = 2_000
+) -> dict[str, Any]:
     """Time `calls` individual invocations and return percentiles in microseconds."""
     for _ in range(warmup):
         fn()
@@ -317,7 +334,7 @@ def latency_percentiles(fn: Callable[[], object], calls: int, warmup: int = 2_00
     }
 
 
-def bench_latency(calls: int, rng: np.random.Generator) -> list[dict]:
+def bench_latency(calls: int, rng: np.random.Generator) -> list[dict[str, Any]]:
     """Per-call latency for the small inputs typical of a real-time loop.
 
     Each case is a single Python-level call; the numbers therefore include argument
@@ -330,21 +347,29 @@ def bench_latency(calls: int, rng: np.random.Generator) -> list[dict]:
     cases: list[tuple[str, Callable[[], object]]] = []
     for n in (64, 256, 1_024, 4_096):
         x = rng.standard_normal(n)
-        cases.append((f"goertzel        N={n:<6}", lambda x=x: fg.goertzel(x, 0.1)))
+        f = round(0.1 * n) / n
+        cases.append((f"goertzel        N={n:<6}", functools.partial(fg.goertzel, x, f)))
     x256 = rng.standard_normal(256)
     x65k = rng.standard_normal(65_536)
-    f8 = np.linspace(0.05, 0.45, 8)
+    f8 = np.round(np.linspace(0.05, 0.45, 8) * 256) / 256  # bins of 256 (and of 65536)
     cases.append(("batch           N=256    M=8 (serial)", lambda: fg.goertzel_batch(x256, f8)))
     cases.append(("batch           N=65536  M=8 (OpenMP)", lambda: fg.goertzel_batch(x65k, f8)))
     x1k = rng.standard_normal(1_024)
     cases.append(
         ("sliding         N=1024 W=256 M=4", lambda: fg.goertzel_sliding_batch(x1k, 256, f8[:4]))
     )
+    buf1k = np.empty((1_024 - 256 + 1, 4, 2))
+    cases.append(
+        (
+            "sliding (out=)  N=1024 W=256 M=4",
+            lambda: fg.goertzel_sliding_batch(x1k, 256, f8[:4], out=buf1k),
+        )
+    )
     ref = rng.standard_normal(256)
     cases.append(("np.fft.rfft     N=256 (reference)", lambda: np.fft.rfft(ref)))
-    cases.append(("NumPy 2x dot    N=256 (reference)", lambda: np_single_bin(ref, 0.1)))
+    cases.append(("NumPy 2x dot    N=256 (reference)", lambda: np_single_bin(ref, 26 / 256)))
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     print(f"=== per-call latency, {calls} calls each (microseconds) ===")
     print(f"{'case':<40} {'p50':>8} {'p90':>8} {'p99':>8} {'p99.9':>8} {'max':>9} {'mean':>8}")
     for name, fn in cases:
@@ -432,7 +457,7 @@ def main() -> None:
 
     rng = np.random.default_rng(1)
     calls = args.calls or (10_000 if args.quick else 100_000)
-    report: dict = {
+    report: dict[str, Any] = {
         "environment": env,
         "methodology": (
             "throughput: timeit.autorange number, min and median of repeat rounds, ratios use "

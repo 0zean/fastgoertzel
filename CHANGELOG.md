@@ -4,7 +4,128 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [1.0.3] - Unreleased
+## [2.0.0] - 2026-10-13
+
+The 2.0 line: frequencies are evaluated exactly, the sample rate and a streaming filter
+are built in, the kernels are three to thirty times faster, and the build system, test
+suite, and documentation are new. See the
+[migration guide](https://0zean.github.io/fastgoertzel/migration.html) for upgrading.
+
+### Breaking
+- **Frequencies are evaluated exactly.** In 1.x every function rounded
+  `frequency * len(x)` *down* to an integer DFT bin, so `goertzel(x, 0.0099)` on 100
+  samples silently returned the DC bin, and about 6 % of exact `k/N` inputs landed on
+  bin `k-1` through floating-point rounding. 2.0 uses the generalized Goertzel
+  algorithm: the DTFT is evaluated at exactly the frequency you pass. Results are
+  unchanged whenever `frequency * len(x)` was an exact integer. If you relied on the old
+  bin behaviour, call `goertzel_bin(x, k)` with the integer bin, which is the same
+  quantity as `numpy.fft.fft(x)[k]` (equal to rounding).
+- Amplitudes at DC and Nyquist are now the true sinusoid amplitude (`|X|/N`); 1.x
+  reported twice that value there.
+- Arguments after the positional ones are keyword-only: `goertzel(x, f, 8000)` is a
+  `TypeError`, write `goertzel(x, f, fs=8000)`.
+- The private extension module is renamed from `fastgoertzel._fastgoertzel_core` to
+  `fastgoertzel._core`. Import from `fastgoertzel` as before.
+- Build system moved from setuptools to scikit-build-core + CMake. `setup.py` and
+  `MANIFEST.in` are gone; compiler flags, OpenMP detection, and warnings-as-errors live in
+  `CMakeLists.txt`. Build options are passed via `CMAKE_ARGS` (see README):
+  `FASTGOERTZEL_NATIVE=1` becomes `CMAKE_ARGS=-DFASTGOERTZEL_NATIVE=ON`.
+
+### Added
+- `fs=` keyword on every function and on `GoertzelFilter`: frequencies in hertz (or any
+  unit of `fs`), converted as `frequency / fs`. Closes the long-standing README TODO.
+- `GoertzelFilter(frequency, *, fs=None)`: stateful streaming filter with `push()`
+  (scalars or arrays, any chunking), `result()`, `result_complex()`, `reset()`,
+  `n_samples`. Closes the "IIR" README TODO: feed samples as they arrive, read the
+  spectrum at any time. Chunks of 4,096 samples or more go through the block-parallel
+  kernel and are folded in with the shift theorem.
+- `goertzel_complex()`, `goertzel_batch_complex()` and `goertzel_sliding_batch_complex()`
+  return the unscaled complex DTFT value, skipping the `sqrt`/`atan2` of the amplitude
+  form (which dominates the per-window cost of the sliding form).
+- `goertzel_bin(x, k)`: integer-bin form of the final step, the 1.x computation with an
+  explicit bin and exact integer twiddles.
+- `scale=` keyword: `'amplitude'` (default, DC/Nyquist aware), `'magnitude'` (`|X|`),
+  `'power'` (`|X|**2`, no square root).
+- `threads=` keyword on the batch and sliding functions: OpenMP thread count for that
+  call; `threads=1` forces serial execution.
+- `out=` keyword on the batch and sliding functions: a preallocated result array (exact
+  shape and dtype, C-contiguous, writeable, not overlapping `x`) that the kernels write
+  into directly, so a call in a loop allocates nothing. For the sliding functions this
+  also removes the page-faulting of a fresh result, which was the bound on their thread
+  scaling: N = 1e5, W = 256, M = 8 on 32 threads goes from 2.2 ms to 1.0 ms (0.4 ms for
+  the complex form).
+- macOS wheels now bundle an OpenMP runtime (LLVM `libomp`, built for macOS 10.9 / 11.0),
+  so the batch and sliding functions are multi-threaded on macOS as on Linux and Windows.
+  The wheel build fails rather than ship a single-threaded macOS wheel.
+- `step=` keyword on the sliding functions for strided windows.
+- Type stubs (`_core.pyi`, `py.typed`), checked against the compiled module by stubtest
+  in CI.
+- Header-only C++ core, `include/fastgoertzel/goertzel.hpp`, usable without Python
+  (CMake target `fastgoertzel::core`), with its own doctest suite.
+- Documentation site at <https://0zean.github.io/fastgoertzel/>: usage guide,
+  conventions, API reference generated from the docstrings, performance methodology,
+  migration guide. The docstring examples and the README code blocks run in the test
+  suite.
+- Python 3.14 in CI and in the wheel matrix. The module declares itself safe for
+  free-threaded CPython (`py::mod_gil_not_used`); it holds no mutable global state.
+- macOS x86_64 wheels are built and tested on an Intel runner instead of being
+  cross-built untested.
+
+### Performance
+Measured on the reference machine (i9-14900KF, MSVC, AVX2+FMA kernel); see the README
+tables, which are rendered from one recorded benchmark run.
+- One frequency: 2.5 billion samples/s single-threaded, up from 0.65 in 1.0.3 (3.9x).
+  Signals of 1,024 samples or more run as independent blocks of at least 512 samples
+  (up to eight from 4,096 samples on) whose results are combined with exact twiddles, which removes the recurrence's latency bound. The
+  recurrence itself is written as `coeff*s1 + (x - s2)`, which contracts to one FMA.
+- Batch: up to eight frequencies share one pass over the signal; fewer frequencies are
+  padded with signal blocks so eight chains always run. N = 1e6, M = 32: 12.6 ms on one
+  thread (was 48.8 ms), about 1 ms on 32 threads (was 2.25 ms). On one thread a batch
+  costs the same per frequency as single calls; its gains are OpenMP and fewer memory
+  passes for out-of-cache signals.
+- Sliding windows: sliding-DFT update with an exact re-synchronisation every 256
+  windows; cost per hop no longer depends on the window length. N = 1e5, W = 256, M = 8:
+  11.8 ms on one thread (was 362 ms), 2.2 ms on 32 threads (was 17 ms), 1.0 ms with a
+  reused `out=` array. Step sizes of `window_size / 4` or more fall back to exact
+  per-window evaluation.
+- Runtime dispatch: the hot loops are compiled for baseline x86-64 and for AVX2+FMA and
+  selected at import. Wheels stay portable; `FASTGOERTZEL_KERNEL=baseline|avx2` overrides
+  the choice and `fastgoertzel._core._kernel` reports it. The release workflow runs the
+  test suite under QEMU with a pre-AVX CPU model to prove the baseline path.
+- Results are independent of the thread count and of the kernel build beyond rounding:
+  the work decomposition depends only on the input sizes and the combination order is
+  fixed.
+- The final twiddle of the generalized form is reduced modulo one cycle with an
+  error-free product, so accuracy does not degrade for long signals or high frequencies.
+
+### Changed
+- Repository layout: Python package in `src/fastgoertzel/`, header-only C++ core in
+  `include/fastgoertzel/`, bindings and kernels in `cpp/`, C++ micro-benchmark in
+  `benchmarks/cpp/`, Sphinx sources in `docs/`.
+- Warnings raised to `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`
+  (`/W4 /permissive-` on MSVC) and treated as errors in CI.
+- `FASTGOERTZEL_KERNEL` is checked: a value other than `auto`, `baseline` or `avx2`
+  (case-insensitive), or `avx2` on a machine that cannot run it, fails the import with
+  a clear message instead of being ignored or crashing later.
+- Error messages and `repr(GoertzelFilter(...))` print numbers with 15 significant
+  digits instead of six fixed decimals (`-1e-09`, not `-0.000000`).
+- Free-threaded CPython 3.13t and 3.14t wheels are built alongside the regular ones.
+
+### Development
+- Test suite: reference tests against `numpy.fft` and direct DTFT sums, Hypothesis
+  property tests, subprocess crash guards, thread-count and kernel-build invariance,
+  streaming and sliding equivalence, machine-independent performance ratio guards,
+  docstring and README example tests, and a C++ doctest suite.
+- CI: 3 OS x Python 3.10 to 3.14 plus macOS x86_64, each also run with the baseline
+  kernel forced; ASan/UBSan; C++ tests on 3 OSes; clang-tidy; cibuildwheel smoke builds;
+  Sphinx build with warnings as errors; pre-commit (ruff, clang-format, hygiene);
+  mypy strict and stubtest.
+- Tooling: `.clang-format`, `.clang-tidy`, `.editorconfig`, pre-commit configuration,
+  `Makefile` shortcuts, `CONTRIBUTING.md` with the invariants the tests enforce and the
+  release checklist, `benchmarks/render_tables.py` to render the README tables from a
+  benchmark JSON report.
+
+## [1.0.3] - 2026-10-13
 
 Patch release: crash safety, portable wheels, correct metadata. Results for valid inputs
 are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit on arm64).

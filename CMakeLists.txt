@@ -1,0 +1,180 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+cmake_minimum_required(VERSION 3.18...3.31)
+
+project(fastgoertzel LANGUAGES CXX)
+
+# ---------------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------------
+option(FASTGOERTZEL_OPENMP "Parallelise the batch functions with OpenMP when available" ON)
+option(FASTGOERTZEL_NATIVE "Tune for the build machine (-march=native). Never for wheels." OFF)
+option(FASTGOERTZEL_WERROR "Treat compiler warnings as errors (CI)" OFF)
+option(FASTGOERTZEL_BUILD_PYTHON "Build the Python extension module" ON)
+option(FASTGOERTZEL_BUILD_BENCHMARKS "Build the standalone C++ kernel benchmark" OFF)
+option(FASTGOERTZEL_BUILD_TESTS "Build the C++ unit tests for the header-only core (doctest)" OFF)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# Version: scikit-build-core passes the pyproject.toml version (the _FULL form keeps
+# pre-release suffixes such as .dev0); standalone builds get "dev".
+if(DEFINED SKBUILD_PROJECT_VERSION_FULL)
+  set(FASTGOERTZEL_VERSION "${SKBUILD_PROJECT_VERSION_FULL}")
+elseif(DEFINED SKBUILD_PROJECT_VERSION)
+  set(FASTGOERTZEL_VERSION "${SKBUILD_PROJECT_VERSION}")
+else()
+  set(FASTGOERTZEL_VERSION "dev")
+endif()
+
+# ---------------------------------------------------------------------------
+# Header-only core, usable from C++ without Python
+# ---------------------------------------------------------------------------
+add_library(fastgoertzel_core INTERFACE)
+add_library(fastgoertzel::core ALIAS fastgoertzel_core)
+target_include_directories(fastgoertzel_core INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>)
+target_compile_features(fastgoertzel_core INTERFACE cxx_std_17)
+
+# ---------------------------------------------------------------------------
+# Compiler flag policy (shared by every target below)
+#   * no -march/-arch flags in wheels: they crash on CPUs lacking those features;
+#   * no fast-math: it changes results and, on GCC < 13, sets FTZ/DAZ process-wide;
+#   * FMA contraction allowed: it only improves accuracy and is where the speed is;
+#   * warnings on everywhere, as errors when FASTGOERTZEL_WERROR is set.
+# ---------------------------------------------------------------------------
+add_library(fastgoertzel_flags INTERFACE)
+if(MSVC)
+  target_compile_options(fastgoertzel_flags INTERFACE /W4 /fp:contract /permissive-)
+  if(FASTGOERTZEL_WERROR)
+    target_compile_options(fastgoertzel_flags INTERFACE /WX)
+  endif()
+else()
+  target_compile_options(fastgoertzel_flags INTERFACE
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -ffp-contract=fast)
+  if(FASTGOERTZEL_WERROR)
+    target_compile_options(fastgoertzel_flags INTERFACE -Werror)
+  endif()
+  if(FASTGOERTZEL_NATIVE)
+    target_compile_options(fastgoertzel_flags INTERFACE -march=native)
+  endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# OpenMP (optional). On macOS: brew install libomp and configure with
+#   -DOpenMP_ROOT=$(brew --prefix libomp)
+# ---------------------------------------------------------------------------
+set(FASTGOERTZEL_HAVE_OPENMP OFF)
+if(FASTGOERTZEL_OPENMP)
+  find_package(OpenMP COMPONENTS CXX)
+  if(OpenMP_CXX_FOUND)
+    set(FASTGOERTZEL_HAVE_OPENMP ON)
+  else()
+    message(STATUS "fastgoertzel: OpenMP not found; batch functions will be single-threaded")
+  endif()
+endif()
+
+# ---------------------------------------------------------------------------
+# Python extension module
+# ---------------------------------------------------------------------------
+if(FASTGOERTZEL_BUILD_PYTHON)
+  find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
+  find_package(pybind11 CONFIG REQUIRED)
+
+  # Hot loops are compiled twice: a baseline TU and, on x86, an AVX2+FMA TU selected at
+  # runtime (cpp/kernels.cpp). The two must stay separate objects, so link-time optimisation
+  # is off for this module (NO_EXTRAS); LTO could otherwise inline one into the other.
+  set(_fg_sources cpp/bindings.cpp cpp/kernels.cpp cpp/kernels_baseline.cpp)
+  set(_fg_arch "${CMAKE_SYSTEM_PROCESSOR}")
+  if(CMAKE_OSX_ARCHITECTURES)
+    set(_fg_arch "${CMAKE_OSX_ARCHITECTURES}")
+  endif()
+  set(FASTGOERTZEL_HAVE_AVX2_TU OFF)
+  if(_fg_arch MATCHES "^(x86_64|AMD64|amd64|i[3-6]86|x86|X86)$")
+    set(FASTGOERTZEL_HAVE_AVX2_TU ON)
+    list(APPEND _fg_sources cpp/kernels_avx2.cpp)
+    if(MSVC)
+      set_source_files_properties(cpp/kernels_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+    else()
+      set_source_files_properties(cpp/kernels_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+    endif()
+  endif()
+
+  pybind11_add_module(_core MODULE NO_EXTRAS ${_fg_sources})
+  target_link_libraries(_core PRIVATE fastgoertzel::core fastgoertzel_flags)
+  target_compile_definitions(_core PRIVATE VERSION_INFO=${FASTGOERTZEL_VERSION})
+  if(FASTGOERTZEL_HAVE_AVX2_TU)
+    target_compile_definitions(_core PRIVATE FASTGOERTZEL_HAVE_AVX2_TU=1)
+  endif()
+  if(FASTGOERTZEL_HAVE_OPENMP)
+    target_link_libraries(_core PRIVATE OpenMP::OpenMP_CXX)
+    if(APPLE)
+      # LLVM's libomp.dylib (conda-forge build used for the wheels) has an @rpath install
+      # name. CMake puts its directory on the build-tree rpath and strips that entry again
+      # at install, so the installed module could not resolve the library and delocate
+      # could not bundle it. Keeping the directory as the install rpath fixes both; delocate
+      # then rewrites the load command to the bundled copy. Homebrew's libomp has an
+      # absolute install name and is unaffected either way.
+      set(_fg_omp_dirs "")
+      foreach(_fg_lib IN LISTS OpenMP_CXX_LIB_NAMES)
+        if(OpenMP_${_fg_lib}_LIBRARY)
+          get_filename_component(_fg_dir "${OpenMP_${_fg_lib}_LIBRARY}" DIRECTORY)
+          list(APPEND _fg_omp_dirs "${_fg_dir}")
+        endif()
+      endforeach()
+      if(_fg_omp_dirs)
+        list(REMOVE_DUPLICATES _fg_omp_dirs)
+        set_target_properties(_core PROPERTIES INSTALL_RPATH "${_fg_omp_dirs}")
+        message(STATUS "fastgoertzel: install rpath for OpenMP: ${_fg_omp_dirs}")
+      endif()
+    endif()
+  endif()
+
+  install(TARGETS _core LIBRARY DESTINATION fastgoertzel)
+endif()
+
+# ---------------------------------------------------------------------------
+# Standalone C++ kernel benchmark (not shipped). Configure with
+#   cmake -S . -B build-bench -DFASTGOERTZEL_BUILD_PYTHON=OFF -DFASTGOERTZEL_BUILD_BENCHMARKS=ON
+# ---------------------------------------------------------------------------
+if(FASTGOERTZEL_BUILD_BENCHMARKS)
+  add_executable(kernel_bench benchmarks/cpp/kernel_bench.cpp)
+  target_link_libraries(kernel_bench PRIVATE fastgoertzel::core fastgoertzel_flags)
+endif()
+
+# ---------------------------------------------------------------------------
+# C++ unit tests for the header-only core (doctest, fetched at configure time).
+#   cmake -S . -B build/cpp -DFASTGOERTZEL_BUILD_PYTHON=OFF -DFASTGOERTZEL_BUILD_TESTS=ON
+#   cmake --build build/cpp && ctest --test-dir build/cpp --output-on-failure
+# ---------------------------------------------------------------------------
+if(FASTGOERTZEL_BUILD_TESTS)
+  include(FetchContent)
+  # doctest 2.4.11 still declares cmake_minimum_required(VERSION 3.0), which CMake 4 refuses
+  # to configure; this is the documented opt-in to treat it as 3.5.
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+  FetchContent_Declare(
+    doctest
+    GIT_REPOSITORY https://github.com/doctest/doctest.git
+    GIT_TAG v2.4.11
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(doctest)
+  # doctest is third-party: treat its headers as system headers so our warning policy does
+  # not apply to them (MSVC 19.51 raises C5285 inside doctest.h, for example).
+  get_target_property(_doctest_includes doctest INTERFACE_INCLUDE_DIRECTORIES)
+  set_target_properties(doctest PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+                                           "${_doctest_includes}")
+  enable_testing()
+  add_executable(core_tests tests/cpp/test_core.cpp)
+  target_link_libraries(core_tests PRIVATE fastgoertzel::core fastgoertzel_flags doctest::doctest)
+  add_test(NAME core_tests COMMAND core_tests)
+endif()
+
+message(STATUS "fastgoertzel ${FASTGOERTZEL_VERSION}: OpenMP=${FASTGOERTZEL_HAVE_OPENMP} "
+               "avx2_tu=${FASTGOERTZEL_HAVE_AVX2_TU} native=${FASTGOERTZEL_NATIVE} "
+               "werror=${FASTGOERTZEL_WERROR}")

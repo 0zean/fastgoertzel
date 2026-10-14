@@ -1,10 +1,10 @@
 name: Publish to PyPI
 
+# Triggered by the release tag only. A GitHub Release created from that tag afterwards must
+# not start a second run, which would fail at upload because the files already exist.
 on:
   push:
     tags: ["v*"]
-  release:
-    types: [published]
   workflow_dispatch:
 
 jobs:
@@ -18,9 +18,12 @@ jobs:
           python-version: "3.12"
       - run: pipx run build --sdist
       - name: Check sdist installs and passes tests
+        # Same deterministic subset as the wheel tests: the property tests need hypothesis
+        # and the timing tests are meaningless on a shared runner.
         run: |
           python -m pip install pytest dist/*.tar.gz
-          pytest tests -q
+          pytest tests -q -p no:cacheprovider \
+            --ignore=tests/test_properties.py --ignore=tests/test_performance.py
       - uses: actions/upload-artifact@v4
         with:
           name: sdist
@@ -32,7 +35,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macos-latest is arm64, macos-15-intel is x86_64: each macOS wheel is built and
+        # tested on its own architecture.
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
 
@@ -53,31 +58,31 @@ jobs:
           path: ./wheelhouse/*.whl
 
   isa-policy:
-    name: Verify Linux wheels contain no AVX code
+    name: Verify the Linux wheel runs on a CPU without AVX
     needs: wheels
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: wheels-ubuntu-latest
           path: wheelhouse
-      - name: Disassemble x86_64 extension modules and look for AVX register use
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The hot loops exist in a baseline and an AVX2+FMA build selected at import. Running
+      # the test suite under QEMU with a pre-AVX CPU model proves that the baseline build is
+      # chosen and that no AVX instruction is reachable outside the dispatched kernel.
+      - name: Install the x86_64 wheel and run the tests under qemu -cpu Nehalem
         run: |
           set -euo pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq binutils unzip
-          found=0
-          for whl in wheelhouse/*x86_64*.whl; do
-            rm -rf /tmp/w && mkdir -p /tmp/w && unzip -q -o "$whl" -d /tmp/w
-            for so in $(find /tmp/w/fastgoertzel -name '_fastgoertzel_core*.so'); do
-              n=$(objdump -d "$so" | grep -cE '%(y|z)mm' || true)
-              echo "$whl: $(basename "$so"): $n AVX instructions"
-              if [ "$n" != "0" ]; then found=1; fi
-            done
-          done
-          if [ "$found" != "0" ]; then
-            echo "::error::Linux wheel contains AVX/AVX-512 code; the ISA policy forbids it (see the flag policy in setup.py)"
-            exit 1
-          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq qemu-user
+          python -m pip install --upgrade pip
+          pip install pytest numpy
+          pip install --no-index --find-links wheelhouse "fastgoertzel"
+          qemu-x86_64 -cpu Nehalem "$(which python)" -c "from fastgoertzel import _core; print('kernel:', _core._kernel); assert _core._kernel == 'baseline'"
+          qemu-x86_64 -cpu Nehalem "$(which python)" -m pytest tests -q -p no:cacheprovider -x \
+            --ignore=tests/test_properties.py --ignore=tests/test_performance.py
 
   publish:
     name: Upload to PyPI
