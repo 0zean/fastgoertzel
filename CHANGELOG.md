@@ -4,14 +4,14 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
-## [2.0.0.dev0] - 2026-10-13
+## 2.0.0[2.0.0.dev0] - 2026-10-13
 
 The 2.0 line: frequencies are evaluated exactly, the sample rate and a streaming filter
 are built in, the kernels are three to thirty times faster, and the build system, test
 suite, and documentation are new. See the
 [migration guide](https://0zean.github.io/fastgoertzel/migration.html) for upgrading.
 
-### Breaking
+### 2.0.0Breaking
 - **Frequencies are evaluated exactly.** In 1.x every function rounded
   `frequency * len(x)` *down* to an integer DFT bin, so `goertzel(x, 0.0099)` on 100
   samples silently returned the DC bin, and about 6 % of exact `k/N` inputs landed on
@@ -31,7 +31,7 @@ suite, and documentation are new. See the
   `CMakeLists.txt`. Build options are passed via `CMAKE_ARGS` (see README):
   `FASTGOERTZEL_NATIVE=1` becomes `CMAKE_ARGS=-DFASTGOERTZEL_NATIVE=ON`.
 
-### Added
+### 2.0.0Added
 - `fs=` keyword on every function and on `GoertzelFilter`: frequencies in hertz (or any
   unit of `fs`), converted as `frequency / fs`. Closes the long-standing README TODO.
 - `GoertzelFilter(frequency, *, fs=None)`: stateful streaming filter with `push()`
@@ -62,7 +62,7 @@ suite, and documentation are new. See the
 - macOS x86_64 wheels are now built and tested on an Intel runner instead of being
   cross-built untested.
 
-### Performance
+### 2.0.0Performance
 Measured on the reference machine (i9-14900KF, MSVC, AVX2+FMA kernel); see the README
 tables, which are rendered from one recorded benchmark run.
 - One frequency: 2.5 billion samples/s single-threaded, up from 0.65 in 1.0.3 (3.9x).
@@ -88,14 +88,14 @@ tables, which are rendered from one recorded benchmark run.
 - The final twiddle of the generalized form is reduced modulo one cycle with an
   error-free product, so accuracy does not degrade for long signals or high frequencies.
 
-### Changed
+### 2.0.0Changed
 - Repository layout: Python package in `src/fastgoertzel/`, header-only C++ core in
   `include/fastgoertzel/`, bindings and kernels in `cpp/`, C++ micro-benchmark in
   `benchmarks/cpp/`, Sphinx sources in `docs/`.
 - Warnings raised to `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`
   (`/W4 /permissive-` on MSVC) and treated as errors in CI.
 
-### Development
+### 2.0.0Development
 - Test suite: reference tests against `numpy.fft` and direct DTFT sums, Hypothesis
   property tests, subprocess crash guards, thread-count and kernel-build invariance,
   streaming and sliding equivalence, machine-independent performance ratio guards,
@@ -109,12 +109,12 @@ tables, which are rendered from one recorded benchmark run.
   release checklist, `benchmarks/render_tables.py` to render the README tables from a
   benchmark JSON report.
 
-## [1.0.3] - 2026-10-13
+## 2.0.0[1.0.3] - 2026-10-13
 
 Patch release: crash safety, portable wheels, correct metadata. Results for valid inputs
 are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit on arm64).
 
-### Fixed
+### 2.0.0Fixed
 - `goertzel_sliding_batch` terminated the Python process for any out-of-range frequency
   or `window_size == 0` (exception thrown inside an OpenMP region). All validation now
   happens before the GIL is released and before any parallel region.
@@ -129,7 +129,7 @@ are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit o
 - License metadata said MIT on PyPI while shipping GPLv3 text. The project is GPLv3+
   and the metadata now says so.
 
-### Changed
+### 2.0.0Changed
 - Build flags: removed `-march=native`, `-mavx2`, `/arch:AVX2`, `-ffast-math`, `/fp:fast`,
   `/Qpar`, `-funroll-loops`, `-ftree-vectorize`, `-flto`. Published wheels now run on any
   x86-64 or arm64 CPU, and importing the module no longer changes the process's
@@ -146,7 +146,7 @@ are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit o
 - Benchmark script rewritten with named baselines, thread-pinned runs, per-call latency
   percentiles, and JSON output.
 
-### Added
+### 2.0.0Added
 - Source distribution is now published alongside wheels.
 - Windows wheels bundle the OpenMP runtime (`vcomp140.dll`) via delvewheel.
 - Linux aarch64 wheels, macOS x86_64 wheels.
@@ -156,6 +156,6 @@ are unchanged (within 1e-12 on x86-64; FMA contraction may change the last bit o
 - README roadmap for 2.0 (exact non-integer-bin frequencies, streaming filter API,
   sampling-rate support, faster kernels).
 
-## [1.0.2] - 2025-12-28
+## 2.0.0[1.0.2] - 2025-12-28
 
 Previous release; see git history.
