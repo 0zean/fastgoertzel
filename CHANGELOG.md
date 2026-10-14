@@ -54,8 +54,9 @@ suite, and documentation are new. See the
   also removes the page-faulting of a fresh result, which was the bound on their thread
   scaling: N = 1e5, W = 256, M = 8 on 32 threads goes from 2.2 ms to 1.0 ms (0.4 ms for
   the complex form).
-- macOS wheels now bundle an OpenMP runtime (LLVM `libomp`, built for macOS 10.9 / 11.0),
-  so the batch and sliding functions are multi-threaded on macOS as on Linux and Windows.
+- macOS wheels now bundle an OpenMP runtime (LLVM 19 `libomp`, built from source for
+  macOS 10.13 / 11.0), so the batch and sliding functions are multi-threaded on macOS as on
+  Linux and Windows. The x86_64 wheels therefore require macOS 10.13 (NumPy's need 14.0).
   The wheel build fails rather than ship a single-threaded macOS wheel.
 - `step=` keyword on the sliding functions for strided windows.
 - Type stubs (`_core.pyi`, `py.typed`), checked against the compiled module by stubtest
@@ -109,7 +110,8 @@ tables, which are rendered from one recorded benchmark run.
   a clear message instead of being ignored or crashing later.
 - Error messages and `repr(GoertzelFilter(...))` print numbers with 15 significant
   digits instead of six fixed decimals (`-1e-09`, not `-0.000000`).
-- Free-threaded CPython 3.13t and 3.14t wheels are built alongside the regular ones.
+- Free-threaded CPython 3.13t and 3.14t wheels are built alongside the regular ones,
+  except for 32-bit Windows and i686 Linux, which have no free-threaded NumPy wheels.
 
 ### Development
 - Test suite: reference tests against `numpy.fft` and direct DTFT sums, Hypothesis

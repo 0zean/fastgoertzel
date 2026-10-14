@@ -1,28 +1,24 @@
 #!/usr/bin/env bash
-# Fetch a prebuilt LLVM OpenMP runtime for the macOS wheel builds (cibuildwheel before-all).
+# Build the LLVM OpenMP runtime for the macOS wheel builds (cibuildwheel before-all).
 #
-# Apple's compiler ships no OpenMP runtime. Homebrew's libomp bottles are built for the
-# runner's macOS release and carry that release as their minimum version, which delocate
-# would then force onto the wheel (macosx_15_0 instead of 10.13 / 11.0). The conda-forge
-# build below targets macOS 10.9 (x86_64) and 11.0 (arm64), below cibuildwheel's default
-# deployment targets, so the wheel keeps its normal platform tag. scikit-learn ships its
-# macOS wheels the same way.
+# Apple's compiler ships no OpenMP runtime, and the prebuilt alternatives do not fit:
+# Homebrew's libomp bottles are built for the runner's macOS release and carry that as their
+# minimum version, which delocate would force onto the wheel (macosx_15_0); conda-forge's old
+# tar.bz2 builds (12.0.1, 2021) aborted intermittently on x86_64 when several host threads
+# started parallel regions at once. Building from the release sources takes about a minute
+# on the runner, uses the same recipe as Homebrew's formula, and lets us choose the minimum
+# macOS: 10.13 on x86_64 and 11.0 on arm64, the wheels' own deployment targets (set in
+# pyproject.toml for x86_64; 11.0 is cibuildwheel's arm64 default).
 #
 # Result: $HOME/openmp/{include/omp.h,lib/libomp.dylib}. pyproject.toml points CMake at it
 # with -DOpenMP_ROOT; CMakeLists.txt keeps its directory as the module's install rpath so
 # that delocate can find the dylib (its install name is @rpath/libomp.dylib) and bundle it.
 set -euo pipefail
 
-base="https://api.anaconda.org/download/conda-forge/llvm-openmp/12.0.1"
+llvm_version="19.1.7"
 case "$(uname -m)" in
-    arm64)
-        url="$base/osx-arm64/llvm-openmp-12.0.1-hf3c4609_0.tar.bz2"
-        md5="047713aa71d0dd2294d8cd5f502b23b8"
-        ;;
-    x86_64)
-        url="$base/osx-64/llvm-openmp-12.0.1-hda6cdc1_0.tar.bz2"
-        md5="2a5ef7d574ef02d7c500e5cddc4bf690"
-        ;;
+    arm64) target="11.0" ;;
+    x86_64) target="10.13" ;;
     *)
         echo "macos_openmp.sh: unsupported architecture $(uname -m)" >&2
         exit 1
@@ -30,17 +26,28 @@ case "$(uname -m)" in
 esac
 
 prefix="$HOME/openmp"
-archive="$(mktemp -t llvm-openmp).tar.bz2"
-curl -fsSL --retry 3 -o "$archive" "$url"
-actual="$(md5 -q "$archive")"
-if [[ "$actual" != "$md5" ]]; then
-    echo "macos_openmp.sh: checksum mismatch for $url: $actual != $md5" >&2
-    exit 1
-fi
-mkdir -p "$prefix"
-tar -xjf "$archive" -C "$prefix"
-rm -f "$archive"
+work="$(mktemp -d -t llvm-openmp)"
+base="https://github.com/llvm/llvm-project/releases/download/llvmorg-$llvm_version"
+cd "$work"
+curl -fsSL --retry 3 -o openmp.tar.xz "$base/openmp-$llvm_version.src.tar.xz"
+curl -fsSL --retry 3 -o cmake.tar.xz "$base/cmake-$llvm_version.src.tar.xz"
+tar -xf openmp.tar.xz
+tar -xf cmake.tar.xz
+mv "cmake-$llvm_version.src" cmake  # the openmp tree expects ../cmake/Modules
+
+cmake -S "openmp-$llvm_version.src" -B build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX="$prefix" \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$target" \
+    -DLIBOMP_INSTALL_ALIASES=OFF \
+    -DLIBOMP_OMPT_SUPPORT=OFF \
+    -DOPENMP_ENABLE_LIBOMPTARGET=OFF \
+    -DOPENMP_ENABLE_OMPT_TOOLS=OFF
+cmake --build build --parallel "$(sysctl -n hw.ncpu)"
+cmake --install build
+cd /
+rm -rf "$work"
 
 ls -l "$prefix/include/omp.h" "$prefix/lib/libomp.dylib"
-echo "minimum macOS of libomp.dylib:"
+echo "minimum macOS of libomp.dylib (expect $target):"
 otool -l "$prefix/lib/libomp.dylib" | grep -E -A3 "LC_VERSION_MIN_MACOSX|LC_BUILD_VERSION" | grep -E "version|minos" || true

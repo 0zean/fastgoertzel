@@ -180,7 +180,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # Both macOS architectures: the bundled OpenMP runtime is built per architecture.
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-15-intel]
     steps:
       - uses: actions/checkout@v4
       - name: Build and test one wheel per platform
@@ -189,5 +190,4 @@ jobs:
           # One regular and one free-threaded interpreter per platform.
           CIBW_BUILD: cp312-* cp314t-*
           CIBW_ARCHS_LINUX: x86_64
-          CIBW_ARCHS_MACOS: arm64
           CIBW_ARCHS_WINDOWS: AMD64

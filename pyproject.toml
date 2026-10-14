@@ -121,7 +121,9 @@ build = "cp310-* cp311-* cp312-* cp313-* cp314-* cp313t-* cp314t-*"
 # The module declares itself free-threading safe (py::mod_gil_not_used), so free-threaded
 # CPython gets wheels too; test_concurrency.py runs inside each wheel build.
 enable = ["cpython-freethreading"]
-skip = "*-musllinux_i686"
+# musllinux i686 has no NumPy wheels at all; free-threaded 32-bit Windows and i686 have no
+# NumPy wheels either, so the wheel test would build NumPy from source and fail.
+skip = ["*-musllinux_i686", "cp31?t-win32", "cp31?t-manylinux_i686"]
 build-verbosity = 1
 # Property-based and timing tests need extra packages and are meaningless under the
 # emulation used for some targets, so the wheel smoke test runs the deterministic suite.
@@ -135,10 +137,11 @@ repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 
 # macOS: each architecture is built and tested natively, arm64 on macos-latest and x86_64 on
 # macos-15-intel (see publish.yml), so no cross-built wheel ships untested. Apple Clang has
-# no OpenMP runtime; tools/wheels/macos_openmp.sh fetches one that targets macOS 10.9/11.0
-# (why not Homebrew's is explained there), CMake finds it through OpenMP_ROOT and records
-# its directory as the install rpath (CMakeLists.txt) so delocate can locate and bundle
-# libomp.dylib, and the test command refuses a wheel that came out single-threaded.
+# no OpenMP runtime; tools/wheels/macos_openmp.sh builds LLVM's from source for macOS 10.13
+# (x86_64) / 11.0 (arm64) (why not a prebuilt one is explained there), CMake finds it through
+# OpenMP_ROOT and records its directory as the install rpath (CMakeLists.txt) so delocate can
+# locate and bundle libomp.dylib, and the test command refuses a wheel that came out
+# single-threaded.
 [tool.cibuildwheel.macos]
 before-all = "bash {package}/tools/wheels/macos_openmp.sh"
 environment = { CMAKE_ARGS = "$CMAKE_ARGS -DOpenMP_ROOT=$HOME/openmp" }
@@ -146,6 +149,13 @@ test-command = [
     "python -c \"import fastgoertzel._core as c; assert c._has_openmp, 'macOS wheel was built without OpenMP'\"",
     "pytest {project}/tests -q -p no:cacheprovider --ignore={project}/tests/test_properties.py --ignore={project}/tests/test_performance.py",
 ]
+
+[[tool.cibuildwheel.overrides]]
+# The bundled libomp is built for 10.13, so the x86_64 wheels must not claim 10.9
+# (cibuildwheel's default); delocate checks this. NumPy's own x86_64 wheels need 14.0.
+select = "*-macosx_x86_64"
+inherit.environment = "append"
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.13" }
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64", "aarch64", "i686"]
